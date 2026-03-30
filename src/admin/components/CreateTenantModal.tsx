@@ -30,9 +30,9 @@ interface Props {
 const INIT_FORM: FormState = { company_name: '', email: '', plan: 'basic' }
 
 const PLAN_LABELS: Record<string, string> = {
-  basic: 'Basic (₩99,000/월 · FAQ 50개 · 1,000건)',
-  pro:   'Pro (₩199,000/월 · FAQ 200개 · 5,000건)',
-  master: 'Master (₩399,000/월 · 무제한)',
+  basic:  'Basic (₩99,000/월 · FAQ 50개 · 월 1,000회 답변)',
+  pro:    'Pro (₩199,000/월 · FAQ 200개 · 월 5,000회 답변)',
+  master: 'Master (₩399,000/월 · FAQ 무제한 · 월 답변 무제한)',
 }
 
 // ─── 컴포넌트 ────────────────────────────────────
@@ -252,9 +252,9 @@ export default function CreateTenantModal({ open, onClose, onCreated }: Props) {
                   }}
                   disabled={loading}
                 >
-                  <option value="basic">Basic · ₩99,000/월 · FAQ 50개 · 대화 1,000건</option>
-                  <option value="pro">Pro · ₩199,000/월 · FAQ 200개 · 대화 5,000건</option>
-                  <option value="master">Master · ₩399,000/월 · 전체 무제한</option>
+                  <option value="basic">Basic · ₩99,000/월 · FAQ 50개 · 월 1,000회 답변</option>
+                  <option value="pro">Pro · ₩199,000/월 · FAQ 200개 · 월 5,000회 답변</option>
+                  <option value="master">Master · ₩399,000/월 · FAQ 무제한 · 월 답변 무제한</option>
                 </select>
                 {errors.plan && (
                   <p style={{ fontSize: '12px', color: '#EF4444', marginTop: '4px' }}>
@@ -263,9 +263,9 @@ export default function CreateTenantModal({ open, onClose, onCreated }: Props) {
                 )}
                 {/* 플랜 안내 뱃지 */}
                 <div style={{ marginTop: '8px', padding: '10px 14px', borderRadius: '8px', background: 'var(--bg-primary)', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                  {form.plan === 'basic' && '📦 기본 플랜 — FAQ 최대 50개, 월 1,000건 대화'}
-                  {form.plan === 'pro'   && '🚀 프로 플랜 — FAQ 최대 200개, 월 5,000건 대화 + 주문조회 연동'}
-                  {form.plan === 'master' && '⭐ 마스터 플랜 — FAQ·대화 무제한, 전체 기능 사용 가능'}
+                  {form.plan === 'basic'  && '📦 기본 플랜 — FAQ 최대 50개, 월 1,000회 답변'}
+                  {form.plan === 'pro'    && '🚀 주문조회 포함 — FAQ 최대 200개, 월 5,000회 답변'}
+                  {form.plan === 'master' && '⭐ 모든 기능 무제한 — FAQ 무제한, 월 답변 무제한'}
                 </div>
               </div>
 
