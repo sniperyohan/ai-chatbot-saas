@@ -81,28 +81,86 @@ interface LocalPlatformApi {
 }
 
 const localTenantStore: LocalTenant[] = []
-const localPlatformApiStore: LocalPlatformApi[] = [
+
+// ─────────────────────────────────────────
+// 로컬 fallback 플랫폼 기본 데이터 (7개)
+// Supabase 연결 실패 시 사용
+// ─────────────────────────────────────────
+const DEFAULT_PLATFORMS: LocalPlatformApi[] = [
   {
-    id: 'local-platform-1',
-    platform_name: 'kakao',
-    display_name: '카카오 채널',
-    api_endpoint: 'https://kapi.kakao.com/v1',
-    auth_type: 'bearer',
-    description: '카카오 비즈니스 채널 연동',
-    is_active: false,
+    id: 'local-platform-cafe24',
+    platform_name: 'cafe24',
+    display_name: '카페24',
+    api_endpoint: 'https://{mall_id}.cafe24api.com/api/v2',
+    auth_type: 'oauth2',
+    description: '카페24 쇼핑몰 주문조회 연동',
+    is_active: true,
     created_at: new Date().toISOString(),
   },
   {
-    id: 'local-platform-2',
-    platform_name: 'naver',
+    id: 'local-platform-smartstore',
+    platform_name: 'smartstore',
     display_name: '네이버 스마트스토어',
-    api_endpoint: 'https://api.commerce.naver.com/external',
+    api_endpoint: 'https://api.commerce.naver.com/external/v1',
     auth_type: 'oauth2',
-    description: '네이버 스마트스토어 주문/CS 연동',
-    is_active: false,
+    description: '네이버 스마트스토어 주문조회 연동',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'local-platform-imweb',
+    platform_name: 'imweb',
+    display_name: '아임웹',
+    api_endpoint: 'https://api.imweb.me/v2',
+    auth_type: 'api_key',
+    description: '아임웹 쇼핑몰 주문조회 연동',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'local-platform-godomall',
+    platform_name: 'godomall',
+    display_name: '고도몰(NHN커머스)',
+    api_endpoint: 'https://api.godomall.com/v1',
+    auth_type: 'api_key',
+    description: '고도몰 쇼핑몰 주문조회 연동',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'local-platform-woocommerce',
+    platform_name: 'woocommerce',
+    display_name: 'WooCommerce',
+    api_endpoint: 'https://{shop_url}/wp-json/wc/v3',
+    auth_type: 'api_key',
+    description: '워드프레스 우커머스 주문조회 연동',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'local-platform-kakao',
+    platform_name: 'kakao',
+    display_name: '카카오채널',
+    api_endpoint: 'https://kapi.kakao.com/v1',
+    auth_type: 'bearer',
+    description: '카카오톡 채널 챗봇 연동',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'local-platform-custom',
+    platform_name: 'custom',
+    display_name: '커스텀 API',
+    api_endpoint: '',
+    auth_type: 'api_key',
+    description: '직접 개발한 쇼핑몰 API 연동',
+    is_active: true,
     created_at: new Date().toISOString(),
   },
 ]
+
+// 런타임 변경사항을 반영하는 변경 가능한 복사본
+const localPlatformApiStore: LocalPlatformApi[] = DEFAULT_PLATFORMS.map(p => ({ ...p }))
 
 // 로컬 플랜 저장소 (Supabase 없을 때 사용)
 const localPlanStore = [
@@ -771,6 +829,8 @@ superRouter.put('/password', async (c) => {
 // ─────────────────────────────────────────
 // [10] API 플랫폼 목록
 // GET /api/super/platform-apis
+// Supabase 연결 성공 시: DB 조회 + 초기 데이터 seed
+// Supabase 연결 실패 시: 로컬 fallback (7개) 반환
 // ─────────────────────────────────────────
 superRouter.get('/platform-apis', async (c) => {
   if (!isSupabaseConfigured(c.env)) {
@@ -782,12 +842,52 @@ superRouter.get('/platform-apis', async (c) => {
       .from('platform_apis')
       .select('*')
       .order('created_at', { ascending: true })
+
     if (error && isNetworkOrInternalError(error.message)) {
       return c.json({ success: true, data: localPlatformApiStore })
     }
     if (error) return c.json({ success: false, error: error.message }, 500)
-    // DB에 없으면 로컬 fallback 반환
-    return c.json({ success: true, data: data?.length ? data : localPlatformApiStore })
+
+    // DB가 비어 있으면 7개 기본 데이터 seed (ON CONFLICT DO NOTHING)
+    if (!data || data.length === 0) {
+      const seedRows = [
+        { platform_name: 'cafe24',       display_name: '카페24',              api_endpoint: 'https://{mall_id}.cafe24api.com/api/v2',    auth_type: 'oauth2',  description: '카페24 쇼핑몰 주문조회 연동',           is_active: true },
+        { platform_name: 'smartstore',   display_name: '네이버 스마트스토어',  api_endpoint: 'https://api.commerce.naver.com/external/v1', auth_type: 'oauth2',  description: '네이버 스마트스토어 주문조회 연동',      is_active: true },
+        { platform_name: 'imweb',        display_name: '아임웹',              api_endpoint: 'https://api.imweb.me/v2',                    auth_type: 'api_key', description: '아임웹 쇼핑몰 주문조회 연동',           is_active: true },
+        { platform_name: 'godomall',     display_name: '고도몰(NHN커머스)',   api_endpoint: 'https://api.godomall.com/v1',                auth_type: 'api_key', description: '고도몰 쇼핑몰 주문조회 연동',           is_active: true },
+        { platform_name: 'woocommerce',  display_name: 'WooCommerce',         api_endpoint: 'https://{shop_url}/wp-json/wc/v3',           auth_type: 'api_key', description: '워드프레스 우커머스 주문조회 연동',      is_active: true },
+        { platform_name: 'kakao',        display_name: '카카오채널',           api_endpoint: 'https://kapi.kakao.com/v1',                  auth_type: 'bearer',  description: '카카오톡 채널 챗봇 연동',                is_active: true },
+        { platform_name: 'custom',       display_name: '커스텀 API',           api_endpoint: '',                                           auth_type: 'api_key', description: '직접 개발한 쇼핑몰 API 연동',           is_active: true },
+      ]
+      // upsert (platform_name unique 제약 기준) — 기존 레코드는 건드리지 않음
+      const { data: seeded, error: seedErr } = await supabase
+        .from('platform_apis')
+        .upsert(seedRows, { onConflict: 'platform_name', ignoreDuplicates: true })
+        .select()
+
+      if (seedErr && isNetworkOrInternalError(seedErr.message)) {
+        return c.json({ success: true, data: localPlatformApiStore })
+      }
+      // seed 후 재조회
+      const { data: afterSeed } = await supabase
+        .from('platform_apis').select('*').order('created_at', { ascending: true })
+      return c.json({ success: true, data: afterSeed?.length ? afterSeed : localPlatformApiStore })
+    }
+
+    // DB에 이미 데이터 있을 경우: 카카오채널 누락 시 단건 INSERT
+    const hasKakao = data.some((r: any) => r.platform_name === 'kakao')
+    if (!hasKakao) {
+      await supabase.from('platform_apis').upsert(
+        { platform_name: 'kakao', display_name: '카카오채널', api_endpoint: 'https://kapi.kakao.com/v1', auth_type: 'bearer', description: '카카오톡 채널 챗봇 연동', is_active: true },
+        { onConflict: 'platform_name', ignoreDuplicates: true }
+      ).catch(() => {})
+      // 재조회
+      const { data: refreshed } = await supabase
+        .from('platform_apis').select('*').order('created_at', { ascending: true })
+      return c.json({ success: true, data: refreshed || data })
+    }
+
+    return c.json({ success: true, data })
   } catch {
     return c.json({ success: true, data: localPlatformApiStore })
   }

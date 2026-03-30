@@ -788,7 +788,7 @@ function ChangePasswordModal({ onClose, onLogout }: {
 }
 
 // ════════════════════════════════════════════════════════
-// 관리 드롭다운 메뉴
+// 관리 드롭다운 메뉴 (position:fixed — 테이블 overflow 잘림 방지)
 // ════════════════════════════════════════════════════════
 function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete }: {
   tenant: Tenant
@@ -798,15 +798,45 @@ function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete }: {
   onDelete: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  // fixed 위치 좌표 (버튼 bottom 기준)
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
+  // 외부 클릭 시 닫힘
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (
+        btnRef.current && !btnRef.current.contains(e.target as Node) &&
+        menuRef.current && !menuRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false)
+      }
     }
-    document.addEventListener('mousedown', handleClick)
+    if (open) {
+      document.addEventListener('mousedown', handleClick)
+    }
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
+  }, [open])
+
+  // 스크롤 시 닫힘
+  useEffect(() => {
+    if (!open) return
+    function handleScroll() { setOpen(false) }
+    window.addEventListener('scroll', handleScroll, true)
+    return () => window.removeEventListener('scroll', handleScroll, true)
+  }, [open])
+
+  function handleToggle() {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      setMenuPos({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
+      })
+    }
+    setOpen(o => !o)
+  }
 
   const menuItems = [
     {
@@ -840,9 +870,10 @@ function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete }: {
   ]
 
   return (
-    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+    <div style={{ display: 'inline-block' }}>
       <button
-        onClick={() => setOpen(o => !o)}
+        ref={btnRef}
+        onClick={handleToggle}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: '4px',
           background: open ? 'var(--primary)' : 'var(--bg-primary)',
@@ -871,23 +902,29 @@ function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete }: {
       </button>
 
       {open && (
-        <div style={{
-          position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 200,
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border)',
-          borderRadius: '10px',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
-          minWidth: '140px',
-          overflow: 'hidden',
-          animation: 'fadeIn 0.15s ease-out',
-        }}>
+        <div
+          ref={menuRef}
+          style={{
+            position: 'fixed',
+            top: `${menuPos.top}px`,
+            right: `${menuPos.right}px`,
+            zIndex: 9999,
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            borderRadius: '10px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+            minWidth: '148px',
+            overflow: 'hidden',
+            animation: 'fadeIn 0.15s ease-out',
+          }}
+        >
           {menuItems.map((item, i) => (
             <button
               key={i}
               onClick={item.onClick}
               style={{
                 display: 'block', width: '100%', textAlign: 'left',
-                padding: '9px 14px',
+                padding: '10px 16px',
                 background: item.bg,
                 border: 'none',
                 borderBottom: i < menuItems.length - 1 ? '1px solid var(--border)' : 'none',
