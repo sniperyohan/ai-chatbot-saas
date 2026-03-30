@@ -12,6 +12,9 @@ export type Bindings = {
   RESEND_API_KEY: string
   ENCRYPTION_KEY: string
   ALLOWED_ORIGINS: string
+  // 로컬 개발용 fallback (Supabase 미설정 시)
+  LOCAL_SUPER_ADMIN_EMAIL?: string
+  LOCAL_SUPER_ADMIN_PASSWORD_HASH?: string
 }
 
 export type Variables = {

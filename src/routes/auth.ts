@@ -23,7 +23,24 @@ function validatePassword(pw: string): boolean {
 }
 
 // ─────────────────────────────────────────
+// 헬퍼: Supabase 환경변수가 실제로 설정됐는지 확인
+// ─────────────────────────────────────────
+function isSupabaseConfigured(env: Bindings): boolean {
+  return (
+    !!env.SUPABASE_URL &&
+    !env.SUPABASE_URL.includes('your-project') &&
+    !!env.SUPABASE_SERVICE_KEY &&
+    !env.SUPABASE_SERVICE_KEY.includes('your_supabase')
+  )
+}
+
+// ─────────────────────────────────────────
 // [1] 슈퍼관리자 로그인
+// POST /api/super/login
+//
+// 동작 순서:
+//  1) Supabase가 설정된 경우 → admins 테이블에서 조회 후 bcrypt 검증
+//  2) Supabase 미설정(로컬 개발) → .dev.vars의 LOCAL_SUPER_ADMIN_* fallback 사용
 // ─────────────────────────────────────────
 auth.post('/super/login', async (c) => {
   let body: { email?: string; password?: string }
@@ -33,42 +50,121 @@ auth.post('/super/login', async (c) => {
     return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400)
   }
 
-  const email = (body.email || '').toLowerCase().trim()
-  const password = body.password || ''
+  const email    = (body.email    || '').toLowerCase().trim()
+  const password = (body.password || '')
+
+  console.log('[DEBUG][super/login] 로그인 시도:', { email, passwordLength: password.length })
 
   if (!email || !password) {
     return c.json({ success: false, error: '이메일과 비밀번호를 입력하세요.' }, 400)
   }
 
-  const supabase = createSupabaseAdmin(c.env)
+  // ── JWT 시크릿 확인 ──────────────────────────────
+  const jwtSecret = c.env.SUPER_JWT_SECRET || ''
+  const hasJwtSecret = jwtSecret.length >= 16 && !jwtSecret.includes('your_super')
+  console.log('[DEBUG][super/login] JWT secret 상태:', hasJwtSecret ? '✅ 설정됨' : '⚠️ 기본값(로컬)')
 
-  // 슈퍼관리자 조회
-  const { data: admin, error } = await supabase
-    .from('admins')
-    .select('*')
-    .eq('email', email)
-    .single()
+  // ── 실제 JWT 시크릿 결정 (로컬 fallback 포함) ────
+  const effectiveSecret = hasJwtSecret
+    ? jwtSecret
+    : 'local-dev-super-secret-key-32chars!!'   // .dev.vars 기본값과 동일
 
-  if (error || !admin) {
+  // ════════════════════════════════════════════════
+  // CASE A: Supabase가 실제로 연결된 경우 → DB 조회
+  // ════════════════════════════════════════════════
+  if (isSupabaseConfigured(c.env)) {
+    console.log('[DEBUG][super/login] Supabase 연결 모드')
+    const supabase = createSupabaseAdmin(c.env)
+
+    const { data: admin, error: dbError } = await supabase
+      .from('admins')
+      .select('id, email, password')
+      .eq('email', email)
+      .single()
+
+    console.log('[DEBUG][super/login] DB 조회 결과:', {
+      found: !!admin,
+      dbError: dbError?.message ?? null,
+      adminEmail: admin?.email ?? null,
+      passwordHashPrefix: admin?.password?.substring(0, 7) ?? null,
+    })
+
+    if (dbError || !admin) {
+      return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
+    }
+
+    let isValid = false
+    try {
+      isValid = await bcrypt.compare(password, admin.password)
+    } catch (e: any) {
+      console.error('[DEBUG][super/login] bcrypt 오류:', e.message)
+      return c.json({ success: false, error: '비밀번호 검증 중 오류가 발생했습니다.' }, 500)
+    }
+
+    console.log('[DEBUG][super/login] bcrypt.compare 결과:', isValid)
+
+    if (!isValid) {
+      return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
+    }
+
+    const token = await signJwt(
+      { sub: admin.id, email: admin.email, role: 'super_admin' },
+      effectiveSecret
+    )
+    console.log('[DEBUG][super/login] ✅ 로그인 성공 (DB):', admin.email)
+    return c.json({ success: true, data: { token, admin: { id: admin.id, email: admin.email } } })
+  }
+
+  // ════════════════════════════════════════════════
+  // CASE B: Supabase 미설정 → 로컬 .dev.vars fallback
+  // LOCAL_SUPER_ADMIN_EMAIL / LOCAL_SUPER_ADMIN_PASSWORD_HASH
+  // ════════════════════════════════════════════════
+  const localEmail  = c.env.LOCAL_SUPER_ADMIN_EMAIL    || 'super@admin.local'
+  const localPwHash = c.env.LOCAL_SUPER_ADMIN_PASSWORD_HASH || ''
+
+  console.log('[DEBUG][super/login] 로컬 fallback 모드:', {
+    localEmail,
+    hasLocalHash: !!localPwHash,
+    hashPrefix: localPwHash?.substring(0, 7) ?? null,
+  })
+
+  if (!localPwHash) {
+    return c.json({
+      success: false,
+      error: 'Supabase가 설정되지 않았고, 로컬 fallback 계정도 없습니다. .dev.vars에 LOCAL_SUPER_ADMIN_PASSWORD_HASH를 설정하세요.',
+    }, 503)
+  }
+
+  if (email !== localEmail.toLowerCase()) {
+    console.log('[DEBUG][super/login] 이메일 불일치:', { input: email, expected: localEmail.toLowerCase() })
     return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
   }
 
-  // 비밀번호 검증
-  const isValid = await bcrypt.compare(password, admin.password)
-  if (!isValid) {
+  let isLocalValid = false
+  try {
+    isLocalValid = await bcrypt.compare(password, localPwHash)
+  } catch (e: any) {
+    console.error('[DEBUG][super/login] bcrypt 오류 (local):', e.message)
+    return c.json({ success: false, error: '비밀번호 검증 중 오류가 발생했습니다.' }, 500)
+  }
+
+  console.log('[DEBUG][super/login] bcrypt.compare 결과 (local):', isLocalValid)
+
+  if (!isLocalValid) {
     return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
   }
 
   const token = await signJwt(
-    { sub: admin.id, email: admin.email, role: 'super_admin' },
-    c.env.SUPER_JWT_SECRET
+    { sub: 'local-super-admin', email: localEmail.toLowerCase(), role: 'super_admin' },
+    effectiveSecret
   )
 
+  console.log('[DEBUG][super/login] ✅ 로그인 성공 (로컬 fallback):', localEmail)
   return c.json({
     success: true,
     data: {
       token,
-      admin: { id: admin.id, email: admin.email },
+      admin: { id: 'local-super-admin', email: localEmail.toLowerCase() },
     },
   })
 })
