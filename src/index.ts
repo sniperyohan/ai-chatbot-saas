@@ -77,9 +77,9 @@ const ADMIN_HTML = `<!DOCTYPE html>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <script type="module" crossorigin src="/admin/assets/index-BFMdmXH-.js"></script>
+  <script type="module" crossorigin src="/admin/assets/index-hzgIsYTd.js"></script>
   <link rel="modulepreload" crossorigin href="/admin/assets/react-vendor-B7hvkJMs.js">
-  <link rel="modulepreload" crossorigin href="/admin/assets/lucide-vendor-Bji8JBK5.js">
+  <link rel="modulepreload" crossorigin href="/admin/assets/lucide-vendor-CgDebuRt.js">
   <link rel="modulepreload" crossorigin href="/admin/assets/recharts-vendor-iJR1IU09.js">
   <link rel="stylesheet" crossorigin href="/admin/assets/index-MX6WQWWt.css">
 </head>
@@ -93,6 +93,12 @@ app.get('/admin/*', (c) => {
   const path = c.req.path
   // 정적 에셋은 Cloudflare Pages가 서빙
   if (path.includes('/assets/')) return c.notFound()
+  return c.html(ADMIN_HTML)
+})
+
+// Super Admin SPA - /super/* 경로도 동일한 SPA HTML 서빙
+app.get('/super', (c) => c.redirect('/super/login'))
+app.get('/super/*', (c) => {
   return c.html(ADMIN_HTML)
 })
 
