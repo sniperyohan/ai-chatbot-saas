@@ -70,49 +70,79 @@ auth.post('/super/login', async (c) => {
     : 'local-dev-super-secret-key-32chars!!'   // .dev.vars 기본값과 동일
 
   // ════════════════════════════════════════════════
-  // CASE A: Supabase가 실제로 연결된 경우 → DB 조회
+  // CASE A: Supabase가 설정된 경우 → DB 조회 시도
+  //         네트워크 오류 시 CASE B(로컬 fallback)로 자동 전환
   // ════════════════════════════════════════════════
   if (isSupabaseConfigured(c.env)) {
-    console.log('[DEBUG][super/login] Supabase 연결 모드')
+    console.log('[DEBUG][super/login] Supabase 연결 모드 시도')
     const supabase = createSupabaseAdmin(c.env)
 
-    const { data: admin, error: dbError } = await supabase
-      .from('admins')
-      .select('id, email, password')
-      .eq('email', email)
-      .single()
+    let admin: { id: string; email: string; password: string } | null = null
+    let dbError: { message: string } | null = null
+    let isNetworkError = false
 
-    console.log('[DEBUG][super/login] DB 조회 결과:', {
-      found: !!admin,
-      dbError: dbError?.message ?? null,
-      adminEmail: admin?.email ?? null,
-      passwordHashPrefix: admin?.password?.substring(0, 7) ?? null,
-    })
-
-    if (dbError || !admin) {
-      return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-    }
-
-    let isValid = false
     try {
-      isValid = await bcrypt.compare(password, admin.password)
-    } catch (e: any) {
-      console.error('[DEBUG][super/login] bcrypt 오류:', e.message)
-      return c.json({ success: false, error: '비밀번호 검증 중 오류가 발생했습니다.' }, 500)
+      const result = await supabase
+        .from('admins')
+        .select('id, email, password')
+        .eq('email', email)
+        .single()
+      admin   = result.data
+      dbError = result.error
+    } catch (fetchErr: any) {
+      // DNS 실패 / 네트워크 오류 → 로컬 fallback으로 전환
+      console.warn('[DEBUG][super/login] ⚠️ Supabase 네트워크 오류, 로컬 fallback으로 전환:', fetchErr.message)
+      isNetworkError = true
     }
 
-    console.log('[DEBUG][super/login] bcrypt.compare 결과:', isValid)
-
-    if (!isValid) {
-      return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
+    // Supabase 클라이언트가 네트워크/DNS 오류를 internal error로 반환하는 경우도 감지
+    const errMsg = dbError?.message ?? ''
+    if (!isNetworkError && (
+      errMsg.includes('internal error') ||
+      errMsg.includes('DNS') ||
+      errMsg.includes('fetch failed') ||
+      errMsg.includes('Failed to fetch') ||
+      errMsg.includes('network')
+    )) {
+      console.warn('[DEBUG][super/login] ⚠️ Supabase internal/네트워크 오류 감지, 로컬 fallback으로 전환:', errMsg)
+      isNetworkError = true
     }
 
-    const token = await signJwt(
-      { sub: admin.id, email: admin.email, role: 'super_admin' },
-      effectiveSecret
-    )
-    console.log('[DEBUG][super/login] ✅ 로그인 성공 (DB):', admin.email)
-    return c.json({ success: true, data: { token, admin: { id: admin.id, email: admin.email } } })
+    // 네트워크 오류가 없는 정상 DB 응답 처리
+    if (!isNetworkError) {
+      console.log('[DEBUG][super/login] DB 조회 결과:', {
+        found: !!admin,
+        dbError: errMsg || null,
+        adminEmail: admin?.email ?? null,
+        passwordHashPrefix: admin?.password?.substring(0, 7) ?? null,
+      })
+
+      if (dbError || !admin) {
+        return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
+      }
+
+      let isValid = false
+      try {
+        isValid = await bcrypt.compare(password, admin.password)
+      } catch (e: any) {
+        console.error('[DEBUG][super/login] bcrypt 오류:', e.message)
+        return c.json({ success: false, error: '비밀번호 검증 중 오류가 발생했습니다.' }, 500)
+      }
+
+      console.log('[DEBUG][super/login] bcrypt.compare 결과 (DB):', isValid)
+
+      if (!isValid) {
+        return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
+      }
+
+      const token = await signJwt(
+        { sub: admin.id, email: admin.email, role: 'super_admin' },
+        effectiveSecret
+      )
+      console.log('[DEBUG][super/login] ✅ 로그인 성공 (DB):', admin.email)
+      return c.json({ success: true, data: { token, admin: { id: admin.id, email: admin.email } } })
+    }
+    // isNetworkError === true → 아래 CASE B(로컬 fallback)로 낙하
   }
 
   // ════════════════════════════════════════════════
