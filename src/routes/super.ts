@@ -1,12 +1,19 @@
 // =====================================================
 // 슈퍼관리자 라우터 (SUPER JWT 필요)
-// GET  /api/super/dashboard
-// GET  /api/super/tenants
-// POST /api/super/tenants
-// PUT  /api/super/tenants/:id
+// GET    /api/super/dashboard
+// GET    /api/super/tenants
+// POST   /api/super/tenants
+// PUT    /api/super/tenants/:id
+// PUT    /api/super/tenants/:id/plan
+// PUT    /api/super/tenants/:id/status
 // DELETE /api/super/tenants/:id
-// GET  /api/super/plans
-// PUT  /api/super/plans/:id
+// POST   /api/super/tenants/:id/reset-password
+// GET    /api/super/plans
+// PUT    /api/super/plans/:id
+// PUT    /api/super/password
+// GET    /api/super/platform-apis
+// POST   /api/super/platform-apis
+// PUT    /api/super/platform-apis/:id
 // =====================================================
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
@@ -32,6 +39,21 @@ function isSupabaseConfigured(env: Bindings): boolean {
 }
 
 // ─────────────────────────────────────────
+// 네트워크/DNS 오류 감지
+// ─────────────────────────────────────────
+function isNetworkOrInternalError(msg: string): boolean {
+  return (
+    msg.includes('internal error') ||
+    msg.includes('DNS') ||
+    msg.includes('fetch failed') ||
+    msg.includes('Failed to fetch') ||
+    msg.includes('network') ||
+    msg.includes('ENOTFOUND') ||
+    msg.includes('Name or service not known')
+  )
+}
+
+// ─────────────────────────────────────────
 // 로컬 메모리 fallback 저장소 (샌드박스/개발 환경용)
 // 서버 재시작 시 초기화됨
 // ─────────────────────────────────────────
@@ -47,19 +69,47 @@ interface LocalTenant {
   bot_name: string
 }
 
-const localTenantStore: LocalTenant[] = []
-
-function isNetworkOrInternalError(msg: string): boolean {
-  return (
-    msg.includes('internal error') ||
-    msg.includes('DNS') ||
-    msg.includes('fetch failed') ||
-    msg.includes('Failed to fetch') ||
-    msg.includes('network') ||
-    msg.includes('ENOTFOUND') ||
-    msg.includes('Name or service not known')
-  )
+interface LocalPlatformApi {
+  id: string
+  platform_name: string
+  display_name: string
+  api_endpoint: string
+  auth_type: string
+  description: string
+  is_active: boolean
+  created_at: string
 }
+
+const localTenantStore: LocalTenant[] = []
+const localPlatformApiStore: LocalPlatformApi[] = [
+  {
+    id: 'local-platform-1',
+    platform_name: 'kakao',
+    display_name: '카카오 채널',
+    api_endpoint: 'https://kapi.kakao.com/v1',
+    auth_type: 'bearer',
+    description: '카카오 비즈니스 채널 연동',
+    is_active: false,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'local-platform-2',
+    platform_name: 'naver',
+    display_name: '네이버 스마트스토어',
+    api_endpoint: 'https://api.commerce.naver.com/external',
+    auth_type: 'oauth2',
+    description: '네이버 스마트스토어 주문/CS 연동',
+    is_active: false,
+    created_at: new Date().toISOString(),
+  },
+]
+
+// 로컬 플랜 저장소 (Supabase 없을 때 사용)
+const localPlanStore = [
+  { id: 'local-plan-basic', plan_name: 'basic', price: 99000, faq_limit: 50, chat_limit: 1000 },
+  { id: 'local-plan-pro', plan_name: 'pro', price: 199000, faq_limit: 200, chat_limit: 5000 },
+  { id: 'local-plan-master', plan_name: 'master', price: 399000, faq_limit: -1, chat_limit: -1 },
+]
 
 // ─────────────────────────────────────────
 // 임시 비밀번호 생성 (crypto.getRandomValues)
@@ -68,7 +118,6 @@ function generateTempPassword(): string {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$'
   const arr = new Uint8Array(12)
   crypto.getRandomValues(arr)
-  // 규칙 보장: 대/소/숫자/특수 각 1개
   const upper = 'ABCDEFGHJKMNPQRSTUVWXYZ'
   const lower = 'abcdefghjkmnpqrstuvwxyz'
   const digits = '23456789'
@@ -110,7 +159,6 @@ async function sendWelcomeEmail(
             <tr><td><b>임시 비밀번호</b></td><td><code>${tempPassword}</code></td></tr>
           </table>
           <p>⚠️ 보안을 위해 첫 로그인 후 반드시 비밀번호를 변경해주세요.</p>
-          <p>로그인 URL: <a href="https://your-domain.com/admin/login">관리자 페이지</a></p>
         `,
       }),
     })
@@ -125,17 +173,16 @@ async function sendWelcomeEmail(
 // GET /api/super/dashboard
 // ─────────────────────────────────────────
 superRouter.get('/dashboard', async (c) => {
-  // Supabase 미설정 또는 연결 불가 → 로컬 메모리 fallback
+  const PLAN_PRICES: Record<string, number> = { basic: 99000, pro: 199000, master: 399000 }
+
   if (!isSupabaseConfigured(c.env)) {
-    const activeTenants = localTenantStore.filter(t => t.is_active && !t.is_deleted)
-    const PLAN_PRICES: Record<string, number> = { basic: 99000, pro: 199000, master: 399000 }
-    const monthlyRevenue = activeTenants.reduce((sum, t) => sum + (PLAN_PRICES[t.plan] || 0), 0)
+    const active = localTenantStore.filter(t => t.is_active && !t.is_deleted)
     return c.json({
       success: true,
       data: {
         total_tenants: localTenantStore.filter(t => !t.is_deleted).length,
-        active_tenants: activeTenants.length,
-        monthly_revenue: monthlyRevenue,
+        active_tenants: active.length,
+        monthly_revenue: active.reduce((sum, t) => sum + (PLAN_PRICES[t.plan] || 0), 0),
         total_chats: 0,
         channel_stats: {},
       },
@@ -144,75 +191,57 @@ superRouter.get('/dashboard', async (c) => {
 
   const supabase = createSupabaseAdmin(c.env)
 
-  // Supabase 연결 시도, 네트워크 오류 시 로컬 fallback
   try {
-    const { count: totalTenants } = await supabase
-      .from('tenants')
-      .select('id', { count: 'exact', head: true })
-      .eq('is_deleted', false)
+    const [
+      { count: totalTenants },
+      { count: activeTenants },
+      { count: totalChats },
+      { data: planData },
+      { data: plans },
+      { data: channelData },
+    ] = await Promise.all([
+      supabase.from('tenants').select('id', { count: 'exact', head: true }).eq('is_deleted', false),
+      supabase.from('tenants').select('id', { count: 'exact', head: true }).eq('is_deleted', false).eq('is_active', true),
+      supabase.from('chat_logs').select('id', { count: 'exact', head: true }),
+      supabase.from('tenants').select('plan').eq('is_deleted', false).eq('is_active', true),
+      supabase.from('plans').select('plan_name, price'),
+      supabase.from('chat_logs').select('channel'),
+    ])
 
-    const { count: activeTenants } = await supabase
-      .from('tenants')
-      .select('id', { count: 'exact', head: true })
-      .eq('is_deleted', false)
-      .eq('is_active', true)
-
-    const { count: totalChats } = await supabase
-      .from('chat_logs')
-      .select('id', { count: 'exact', head: true })
-
-    // 이번 달 예상 매출 (플랜 가격 합산)
-    const { data: planData } = await supabase
-      .from('tenants')
-      .select('plan')
-      .eq('is_deleted', false)
-      .eq('is_active', true)
-
-    const { data: plans } = await supabase.from('plans').select('plan_name, price')
     const planPriceMap: Record<string, number> = {}
     for (const p of plans || []) planPriceMap[p.plan_name] = p.price
 
     const monthlyRevenue = (planData || []).reduce(
-      (sum, t) => sum + (planPriceMap[t.plan] || 0),
+      (sum, t) => sum + (planPriceMap[t.plan] || PLAN_PRICES[t.plan] || 0),
       0
     )
-
-    // 채널별 대화량
-    const { data: channelData } = await supabase
-      .from('chat_logs')
-      .select('channel')
 
     const channelStats: Record<string, number> = {}
     for (const row of channelData || []) {
       channelStats[row.channel] = (channelStats[row.channel] || 0) + 1
     }
 
-    // 로컬 메모리 고객사도 합산
     const localActive = localTenantStore.filter(t => t.is_active && !t.is_deleted)
-    const PLAN_PRICES: Record<string, number> = { basic: 99000, pro: 199000, master: 399000 }
-    const localRevenue = localActive.reduce((sum, t) => sum + (PLAN_PRICES[t.plan] || 0), 0)
 
     return c.json({
       success: true,
       data: {
         total_tenants: (totalTenants || 0) + localTenantStore.filter(t => !t.is_deleted).length,
         active_tenants: (activeTenants || 0) + localActive.length,
-        monthly_revenue: monthlyRevenue + localRevenue,
+        monthly_revenue: monthlyRevenue + localActive.reduce((s, t) => s + (PLAN_PRICES[t.plan] || 0), 0),
         total_chats: totalChats || 0,
         channel_stats: channelStats,
       },
     })
   } catch (err: any) {
     console.warn('[super/dashboard] Supabase 오류, 로컬 fallback:', err.message)
-    const activeTenants = localTenantStore.filter(t => t.is_active && !t.is_deleted)
-    const PLAN_PRICES: Record<string, number> = { basic: 99000, pro: 199000, master: 399000 }
-    const monthlyRevenue = activeTenants.reduce((sum, t) => sum + (PLAN_PRICES[t.plan] || 0), 0)
+    const active = localTenantStore.filter(t => t.is_active && !t.is_deleted)
     return c.json({
       success: true,
       data: {
         total_tenants: localTenantStore.filter(t => !t.is_deleted).length,
-        active_tenants: activeTenants.length,
-        monthly_revenue: monthlyRevenue,
+        active_tenants: active.length,
+        monthly_revenue: active.reduce((s, t) => s + (PLAN_PRICES[t.plan] || 0), 0),
         total_chats: 0,
         channel_stats: {},
       },
@@ -222,89 +251,79 @@ superRouter.get('/dashboard', async (c) => {
 
 // ─────────────────────────────────────────
 // [2] 고객사 목록
-// GET /api/super/tenants?page=1&limit=20
+// GET /api/super/tenants?page=1&limit=20&plan=&status=
 // ─────────────────────────────────────────
 superRouter.get('/tenants', async (c) => {
   const page = parseInt(c.req.query('page') || '1')
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100)
   const offset = (page - 1) * limit
+  const planFilter = c.req.query('plan') || ''       // basic|pro|master
+  const statusFilter = c.req.query('status') || ''   // active|inactive
+  const searchQuery = c.req.query('search') || ''
 
-  // Supabase 미설정 → 로컬 메모리 fallback
+  const filterLocalItems = (items: LocalTenant[]) => {
+    let result = items.filter(t => !t.is_deleted)
+    if (planFilter) result = result.filter(t => t.plan === planFilter)
+    if (statusFilter === 'active') result = result.filter(t => t.is_active)
+    if (statusFilter === 'inactive') result = result.filter(t => !t.is_active)
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      result = result.filter(t =>
+        t.company_name.toLowerCase().includes(q) || t.email.toLowerCase().includes(q)
+      )
+    }
+    return result
+  }
+
   if (!isSupabaseConfigured(c.env)) {
-    const active = localTenantStore.filter(t => !t.is_deleted)
+    const active = filterLocalItems(localTenantStore)
     const sliced = active.slice(offset, offset + limit)
     return c.json({
       success: true,
-      data: {
-        items: sliced,
-        total: active.length,
-        page,
-        limit,
-        totalPages: Math.ceil(active.length / limit),
-      },
+      data: { items: sliced, total: active.length, page, limit, totalPages: Math.ceil(active.length / limit) },
     })
   }
 
   const supabase = createSupabaseAdmin(c.env)
-
   try {
-    const { data, count, error } = await supabase
+    let query = supabase
       .from('tenants')
-      .select(
-        'id, company_name, email, plan, is_active, is_deleted, created_at, widget_color, bot_name',
-        { count: 'exact' }
-      )
+      .select('id, company_name, email, plan, is_active, is_deleted, created_at, widget_color, bot_name', { count: 'exact' })
       .eq('is_deleted', false)
       .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
 
-    // 네트워크/internal 오류 감지 → 로컬 fallback
+    if (planFilter) query = query.eq('plan', planFilter)
+    if (statusFilter === 'active') query = query.eq('is_active', true)
+    if (statusFilter === 'inactive') query = query.eq('is_active', false)
+    if (searchQuery) query = query.or(`company_name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%`)
+
+    const { data, count, error } = await query.range(offset, offset + limit - 1)
+
     if (error && isNetworkOrInternalError(error.message)) {
-      console.warn('[super/tenants] Supabase 네트워크 오류, 로컬 fallback:', error.message)
-      const active = localTenantStore.filter(t => !t.is_deleted)
+      const active = filterLocalItems(localTenantStore)
       const sliced = active.slice(offset, offset + limit)
       return c.json({
         success: true,
-        data: {
-          items: sliced,
-          total: active.length,
-          page,
-          limit,
-          totalPages: Math.ceil(active.length / limit),
-        },
+        data: { items: sliced, total: active.length, page, limit, totalPages: Math.ceil(active.length / limit) },
       })
     }
-
     if (error) return c.json({ success: false, error: error.message }, 500)
 
-    // DB 결과 + 로컬 메모리 고객사 합산 (페이지 1에만 로컬 항목 앞에 추가)
-    const localItems = localTenantStore.filter(t => !t.is_deleted)
+    const localItems = filterLocalItems(localTenantStore)
     const allItems = page === 1 ? [...localItems, ...(data || [])] : (data || [])
     const totalCount = (count || 0) + localItems.length
 
     return c.json({
       success: true,
-      data: {
-        items: allItems,
-        total: totalCount,
-        page,
-        limit,
-        totalPages: Math.ceil(totalCount / limit),
-      },
+      data: { items: allItems, total: totalCount, page, limit, totalPages: Math.ceil(totalCount / limit) },
     })
   } catch (err: any) {
     console.warn('[super/tenants] Supabase 예외, 로컬 fallback:', err.message)
-    const active = localTenantStore.filter(t => !t.is_deleted)
+    const active = filterLocalItems(localTenantStore)
     const sliced = active.slice(offset, offset + limit)
     return c.json({
       success: true,
-      data: {
-        items: sliced,
-        total: active.length,
-        page,
-        limit,
-        totalPages: Math.ceil(active.length / limit),
-      },
+      data: { items: sliced, total: active.length, page, limit, totalPages: Math.ceil(active.length / limit) },
     })
   }
 })
@@ -314,18 +333,9 @@ superRouter.get('/tenants', async (c) => {
 // POST /api/super/tenants
 // ─────────────────────────────────────────
 superRouter.post('/tenants', async (c) => {
-  let body: {
-    company_name?: string
-    email?: string
-    plan?: string
-    bot_name?: string
-    widget_color?: string
-  }
-  try {
-    body = await c.req.json()
-  } catch {
-    return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400)
-  }
+  let body: { company_name?: string; email?: string; plan?: string; bot_name?: string; widget_color?: string }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
 
   const { company_name, email, plan = 'basic', bot_name, widget_color } = body
   if (!company_name?.trim() || !email?.trim()) {
@@ -333,18 +343,12 @@ superRouter.post('/tenants', async (c) => {
   }
 
   const normalizedEmail = email.toLowerCase().trim()
+  const TEMP_PASSWORD = 'Test1234!'
 
-  // ───────────────────────────────────────────────────
-  // 로컬 메모리 fallback 처리 함수
-  // ───────────────────────────────────────────────────
   const createLocalTenant = () => {
-    // 로컬 이메일 중복 체크
-    const dupLocal = localTenantStore.find(t => t.email === normalizedEmail && !t.is_deleted)
-    if (dupLocal) {
-      return c.json({ success: false, error: '이미 사용 중인 이메일입니다.' }, 409)
-    }
+    const dup = localTenantStore.find(t => t.email === normalizedEmail && !t.is_deleted)
+    if (dup) return c.json({ success: false, error: '이미 사용 중인 이메일입니다.' }, 409)
 
-    const TEMP_PASSWORD = 'Test1234!'
     const newId = `local-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
     const newTenant: LocalTenant = {
       id: newId,
@@ -358,8 +362,6 @@ superRouter.post('/tenants', async (c) => {
       bot_name: bot_name || 'AI상담봇',
     }
     localTenantStore.push(newTenant)
-    console.log('[super/tenants] 로컬 메모리에 고객사 생성:', newTenant)
-
     return c.json({
       success: true,
       data: {
@@ -371,40 +373,21 @@ superRouter.post('/tenants', async (c) => {
     }, 201)
   }
 
-  // Supabase 미설정 → 즉시 로컬 fallback
-  if (!isSupabaseConfigured(c.env)) {
-    console.log('[super/tenants] Supabase 미설정 → 로컬 fallback')
-    return createLocalTenant()
-  }
+  if (!isSupabaseConfigured(c.env)) return createLocalTenant()
 
-  // ───────────────────────────────────────────────────
-  // Supabase 설정됨 → DB 시도, 네트워크 오류 시 로컬 fallback
-  // ───────────────────────────────────────────────────
   const supabase = createSupabaseAdmin(c.env)
-
   try {
-    // 이메일 중복 체크 (tenants + admins)
     const [{ data: existTenant, error: e1 }, { data: existAdmin, error: e2 }] = await Promise.all([
       supabase.from('tenants').select('id').eq('email', normalizedEmail).single(),
       supabase.from('admins').select('id').eq('email', normalizedEmail).single(),
     ])
 
-    // 네트워크 오류 감지 → 로컬 fallback
-    const combinedErrMsg = (e1?.message || '') + (e2?.message || '')
-    if (isNetworkOrInternalError(combinedErrMsg)) {
-      console.warn('[super/tenants] Supabase 네트워크 오류(중복체크), 로컬 fallback:', combinedErrMsg)
-      return createLocalTenant()
-    }
+    if (isNetworkOrInternalError((e1?.message || '') + (e2?.message || ''))) return createLocalTenant()
+    if (existTenant || existAdmin) return c.json({ success: false, error: '이미 사용 중인 이메일입니다.' }, 409)
 
-    if (existTenant || existAdmin) {
-      return c.json({ success: false, error: '이미 사용 중인 이메일입니다.' }, 409)
-    }
-
-    // 임시 비밀번호 생성
     const tempPassword = generateTempPassword()
     const hashedPassword = await bcrypt.hash(tempPassword, SALT_ROUNDS)
 
-    // 트랜잭션 저장 (tenants + plan_history)
     const { data: newTenant, error: insertError } = await supabase
       .from('tenants')
       .insert({
@@ -419,103 +402,157 @@ superRouter.post('/tenants', async (c) => {
       .select()
       .single()
 
-    // insert 오류 - 네트워크 오류 감지 → 로컬 fallback
     if (insertError) {
-      if (isNetworkOrInternalError(insertError.message)) {
-        console.warn('[super/tenants] Supabase insert 네트워크 오류, 로컬 fallback:', insertError.message)
-        return createLocalTenant()
-      }
+      if (isNetworkOrInternalError(insertError.message)) return createLocalTenant()
       return c.json({ success: false, error: insertError.message }, 500)
     }
 
-    // plan_history 초기 기록
-    await supabase.from('plan_history').insert({
-      tenant_id: newTenant.id,
-      old_plan: 'none',
-      new_plan: plan,
-    }).catch(() => {/* plan_history 실패는 무시 */})
+    await supabase.from('plan_history').insert({ tenant_id: newTenant.id, old_plan: 'none', new_plan: plan })
+      .catch(() => {})
 
-    // 이메일 발송
-    const emailSent = await sendWelcomeEmail(
-      c.env.RESEND_API_KEY,
-      normalizedEmail,
-      company_name!.trim(),
-      tempPassword
-    )
+    const emailSent = await sendWelcomeEmail(c.env.RESEND_API_KEY, normalizedEmail, company_name!.trim(), tempPassword)
 
     return c.json({
       success: true,
       data: {
         tenant: { id: newTenant.id, company_name: newTenant.company_name, email: newTenant.email, plan },
         email_sent: emailSent,
-        // 이메일 발송 실패 시 임시 비밀번호를 응답에 포함
         ...(emailSent ? {} : { temp_password: tempPassword }),
       },
-      message: emailSent
-        ? '고객사가 생성되고 이메일이 발송되었습니다.'
-        : '고객사가 생성되었으나 이메일 발송에 실패했습니다. temp_password를 확인하세요.',
+      message: emailSent ? '고객사가 생성되고 이메일이 발송되었습니다.' : '고객사가 생성되었으나 이메일 발송에 실패했습니다.',
     }, 201)
-
   } catch (err: any) {
-    // 최상위 예외 catch → 로컬 fallback
     console.warn('[super/tenants] Supabase 예외, 로컬 fallback:', err.message)
     return createLocalTenant()
   }
 })
 
 // ─────────────────────────────────────────
-// [4] 고객사 수정
+// [4] 고객사 수정 (범용)
 // PUT /api/super/tenants/:id
 // ─────────────────────────────────────────
 superRouter.put('/tenants/:id', async (c) => {
   const tenantId = c.req.param('id')
-  let body: {
-    plan?: string
-    is_active?: boolean
-    bot_name?: string
-    widget_color?: string
-    greeting_message?: string
+  let body: { plan?: string; is_active?: boolean; bot_name?: string; widget_color?: string; greeting_message?: string }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
+
+  // 로컬 메모리 고객사 처리
+  const localIdx = localTenantStore.findIndex(t => t.id === tenantId && !t.is_deleted)
+  if (localIdx !== -1) {
+    const t = localTenantStore[localIdx]
+    if (body.plan !== undefined) t.plan = body.plan
+    if (body.is_active !== undefined) t.is_active = body.is_active
+    if (body.bot_name) t.bot_name = body.bot_name
+    if (body.widget_color) t.widget_color = body.widget_color
+    return c.json({ success: true, message: '고객사 정보가 수정되었습니다.' })
   }
-  try {
-    body = await c.req.json()
-  } catch {
-    return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400)
-  }
+
+  if (!isSupabaseConfigured(c.env)) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
 
   const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { data: existing } = await supabase
+      .from('tenants').select('plan, is_active').eq('id', tenantId).eq('is_deleted', false).single()
+    if (!existing) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
 
-  // 기존 정보 조회
-  const { data: existing } = await supabase
-    .from('tenants')
-    .select('plan, is_active')
-    .eq('id', tenantId)
-    .eq('is_deleted', false)
-    .single()
+    const updateData: Record<string, unknown> = {}
+    if (body.is_active !== undefined) updateData.is_active = body.is_active
+    if (body.bot_name) updateData.bot_name = body.bot_name
+    if (body.widget_color) updateData.widget_color = body.widget_color
+    if (body.greeting_message) updateData.greeting_message = body.greeting_message
+    if (body.plan && body.plan !== existing.plan) {
+      updateData.plan = body.plan
+      await supabase.from('plan_history').insert({ tenant_id: tenantId, old_plan: existing.plan, new_plan: body.plan })
+        .catch(() => {})
+    }
 
-  if (!existing) {
-    return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+    const { error } = await supabase.from('tenants').update(updateData).eq('id', tenantId)
+    if (error) return c.json({ success: false, error: error.message }, 500)
+    return c.json({ success: true, message: '고객사 정보가 수정되었습니다.' })
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 500)
+  }
+})
+
+// ─────────────────────────────────────────
+// [4-1] 고객사 플랜 변경
+// PUT /api/super/tenants/:id/plan
+// ─────────────────────────────────────────
+superRouter.put('/tenants/:id/plan', async (c) => {
+  const tenantId = c.req.param('id')
+  let body: { plan?: string }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
+
+  const { plan } = body
+  if (!plan || !['basic', 'pro', 'master'].includes(plan)) {
+    return c.json({ success: false, error: '올바른 플랜을 선택하세요.' }, 400)
   }
 
-  const updateData: Record<string, unknown> = {}
-  if (body.is_active !== undefined) updateData.is_active = body.is_active
-  if (body.bot_name) updateData.bot_name = body.bot_name
-  if (body.widget_color) updateData.widget_color = body.widget_color
-  if (body.greeting_message) updateData.greeting_message = body.greeting_message
-
-  // 플랜 변경 처리
-  if (body.plan && body.plan !== existing.plan) {
-    updateData.plan = body.plan
-    await supabase.from('plan_history').insert({
-      tenant_id: tenantId,
-      old_plan: existing.plan,
-      new_plan: body.plan,
-    })
+  // 로컬 메모리 고객사 처리
+  const localIdx = localTenantStore.findIndex(t => t.id === tenantId && !t.is_deleted)
+  if (localIdx !== -1) {
+    localTenantStore[localIdx].plan = plan
+    return c.json({ success: true, message: `플랜이 ${plan}으로 변경되었습니다.` })
   }
 
-  const { error } = await supabase.from('tenants').update(updateData).eq('id', tenantId)
-  if (error) return c.json({ success: false, error: error.message }, 500)
+  if (!isSupabaseConfigured(c.env)) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
 
-  return c.json({ success: true, message: '고객사 정보가 수정되었습니다.' })
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { data: existing, error: fetchErr } = await supabase
+      .from('tenants').select('plan').eq('id', tenantId).eq('is_deleted', false).single()
+
+    if (fetchErr && isNetworkOrInternalError(fetchErr.message)) {
+      return c.json({ success: false, error: 'Supabase 연결 실패. 로컬 고객사만 수정 가능합니다.' }, 503)
+    }
+    if (!existing) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+
+    await supabase.from('plan_history').insert({ tenant_id: tenantId, old_plan: existing.plan, new_plan: plan })
+      .catch(() => {})
+    const { error } = await supabase.from('tenants').update({ plan }).eq('id', tenantId)
+    if (error) return c.json({ success: false, error: error.message }, 500)
+    return c.json({ success: true, message: `플랜이 ${plan}으로 변경되었습니다.` })
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 500)
+  }
+})
+
+// ─────────────────────────────────────────
+// [4-2] 고객사 활성/비활성 토글
+// PUT /api/super/tenants/:id/status
+// ─────────────────────────────────────────
+superRouter.put('/tenants/:id/status', async (c) => {
+  const tenantId = c.req.param('id')
+  let body: { is_active?: boolean }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
+
+  if (body.is_active === undefined) {
+    return c.json({ success: false, error: 'is_active 값이 필요합니다.' }, 400)
+  }
+
+  // 로컬 메모리 고객사 처리
+  const localIdx = localTenantStore.findIndex(t => t.id === tenantId && !t.is_deleted)
+  if (localIdx !== -1) {
+    localTenantStore[localIdx].is_active = body.is_active
+    return c.json({ success: true, message: `고객사가 ${body.is_active ? '활성화' : '비활성화'}되었습니다.` })
+  }
+
+  if (!isSupabaseConfigured(c.env)) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { error } = await supabase.from('tenants').update({ is_active: body.is_active }).eq('id', tenantId)
+    if (error) {
+      if (isNetworkOrInternalError(error.message)) return c.json({ success: false, error: 'Supabase 연결 실패' }, 503)
+      return c.json({ success: false, error: error.message }, 500)
+    }
+    return c.json({ success: true, message: `고객사가 ${body.is_active ? '활성화' : '비활성화'}되었습니다.` })
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 500)
+  }
 })
 
 // ─────────────────────────────────────────
@@ -524,61 +561,334 @@ superRouter.put('/tenants/:id', async (c) => {
 // ─────────────────────────────────────────
 superRouter.delete('/tenants/:id', async (c) => {
   const tenantId = c.req.param('id')
-  const supabase = createSupabaseAdmin(c.env)
 
-  const { data: existing } = await supabase
-    .from('tenants')
-    .select('id')
-    .eq('id', tenantId)
-    .eq('is_deleted', false)
-    .single()
-
-  if (!existing) {
-    return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+  // 로컬 메모리 고객사 처리
+  const localIdx = localTenantStore.findIndex(t => t.id === tenantId && !t.is_deleted)
+  if (localIdx !== -1) {
+    localTenantStore[localIdx].is_deleted = true
+    localTenantStore[localIdx].is_active = false
+    return c.json({ success: true, message: '고객사가 삭제되었습니다.' })
   }
 
-  await supabase
-    .from('tenants')
-    .update({ is_deleted: true, is_active: false })
-    .eq('id', tenantId)
+  if (!isSupabaseConfigured(c.env)) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
 
-  return c.json({ success: true, message: '고객사가 삭제되었습니다.' })
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { data: existing, error: fetchErr } = await supabase
+      .from('tenants').select('id').eq('id', tenantId).eq('is_deleted', false).single()
+
+    if (fetchErr && isNetworkOrInternalError(fetchErr.message)) {
+      return c.json({ success: false, error: 'Supabase 연결 실패' }, 503)
+    }
+    if (!existing) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+
+    await supabase.from('tenants').update({ is_deleted: true, is_active: false }).eq('id', tenantId)
+    return c.json({ success: true, message: '고객사가 삭제되었습니다.' })
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 500)
+  }
 })
 
 // ─────────────────────────────────────────
-// [6] 플랜 목록
+// [6] 비밀번호 초기화
+// POST /api/super/tenants/:id/reset-password
+// ─────────────────────────────────────────
+superRouter.post('/tenants/:id/reset-password', async (c) => {
+  const tenantId = c.req.param('id')
+  const FALLBACK_TEMP = 'Test1234!'
+
+  // 로컬 메모리 고객사 처리
+  const localIdx = localTenantStore.findIndex(t => t.id === tenantId && !t.is_deleted)
+  if (localIdx !== -1) {
+    const tenant = localTenantStore[localIdx]
+    return c.json({
+      success: true,
+      data: {
+        email_sent: false,
+        temp_password: FALLBACK_TEMP,
+        email: tenant.email,
+      },
+      message: '임시 비밀번호가 생성되었습니다. (로컬 메모리 — 직접 전달 필요)',
+    })
+  }
+
+  if (!isSupabaseConfigured(c.env)) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { data: tenant, error: fetchErr } = await supabase
+      .from('tenants').select('id, email, company_name').eq('id', tenantId).eq('is_deleted', false).single()
+
+    if (fetchErr && isNetworkOrInternalError(fetchErr.message)) {
+      return c.json({
+        success: true,
+        data: { email_sent: false, temp_password: FALLBACK_TEMP, email: '' },
+        message: 'Supabase 연결 실패. 임시 비밀번호: ' + FALLBACK_TEMP,
+      })
+    }
+    if (!tenant) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+
+    const tempPassword = generateTempPassword()
+    const hashedPassword = await bcrypt.hash(tempPassword, SALT_ROUNDS)
+
+    const { error: updateErr } = await supabase
+      .from('tenants')
+      .update({ password: hashedPassword, is_temp_password: true })
+      .eq('id', tenantId)
+
+    if (updateErr) return c.json({ success: false, error: updateErr.message }, 500)
+
+    const emailSent = await sendWelcomeEmail(c.env.RESEND_API_KEY, tenant.email, tenant.company_name, tempPassword)
+
+    return c.json({
+      success: true,
+      data: { email_sent: emailSent, temp_password: tempPassword, email: tenant.email },
+      message: emailSent ? '임시 비밀번호가 이메일로 발송되었습니다.' : '임시 비밀번호가 생성되었습니다. 직접 전달해주세요.',
+    })
+  } catch (err: any) {
+    console.warn('[reset-password] Supabase 예외, fallback:', err.message)
+    return c.json({
+      success: true,
+      data: { email_sent: false, temp_password: FALLBACK_TEMP, email: '' },
+      message: 'Supabase 연결 실패. 임시 비밀번호: ' + FALLBACK_TEMP,
+    })
+  }
+})
+
+// ─────────────────────────────────────────
+// [7] 플랜 목록
 // GET /api/super/plans
 // ─────────────────────────────────────────
 superRouter.get('/plans', async (c) => {
+  if (!isSupabaseConfigured(c.env)) {
+    return c.json({ success: true, data: localPlanStore })
+  }
   const supabase = createSupabaseAdmin(c.env)
-  const { data, error } = await supabase.from('plans').select('*').order('price')
-  if (error) return c.json({ success: false, error: error.message }, 500)
-  return c.json({ success: true, data })
+  try {
+    const { data, error } = await supabase.from('plans').select('*').order('price')
+    if (error && isNetworkOrInternalError(error.message)) {
+      return c.json({ success: true, data: localPlanStore })
+    }
+    if (error) return c.json({ success: false, error: error.message }, 500)
+    return c.json({ success: true, data: data?.length ? data : localPlanStore })
+  } catch {
+    return c.json({ success: true, data: localPlanStore })
+  }
 })
 
 // ─────────────────────────────────────────
-// [7] 플랜 수정
+// [8] 플랜 수정
 // PUT /api/super/plans/:id
 // ─────────────────────────────────────────
 superRouter.put('/plans/:id', async (c) => {
   const planId = c.req.param('id')
   let body: { price?: number; faq_limit?: number; chat_limit?: number }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
+
+  // 로컬 플랜 처리
+  const localIdx = localPlanStore.findIndex(p => p.id === planId)
+  if (localIdx !== -1) {
+    if (body.price !== undefined) localPlanStore[localIdx].price = body.price
+    if (body.faq_limit !== undefined) localPlanStore[localIdx].faq_limit = body.faq_limit
+    if (body.chat_limit !== undefined) localPlanStore[localIdx].chat_limit = body.chat_limit
+    return c.json({ success: true, message: '플랜이 수정되었습니다.' })
+  }
+
+  if (!isSupabaseConfigured(c.env)) return c.json({ success: false, error: '플랜을 찾을 수 없습니다.' }, 404)
+
+  const supabase = createSupabaseAdmin(c.env)
   try {
-    body = await c.req.json()
-  } catch {
-    return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400)
+    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (body.price !== undefined) updateData.price = body.price
+    if (body.faq_limit !== undefined) updateData.faq_limit = body.faq_limit
+    if (body.chat_limit !== undefined) updateData.chat_limit = body.chat_limit
+
+    const { error } = await supabase.from('plans').update(updateData).eq('id', planId)
+    if (error && isNetworkOrInternalError(error.message)) {
+      return c.json({ success: false, error: 'Supabase 연결 실패' }, 503)
+    }
+    if (error) return c.json({ success: false, error: error.message }, 500)
+    return c.json({ success: true, message: '플랜이 수정되었습니다.' })
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 500)
+  }
+})
+
+// ─────────────────────────────────────────
+// [9] 슈퍼관리자 비밀번호 변경
+// PUT /api/super/password
+// ─────────────────────────────────────────
+superRouter.put('/password', async (c) => {
+  let body: { current_password?: string; new_password?: string }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
+
+  const { current_password, new_password } = body
+  if (!current_password || !new_password) {
+    return c.json({ success: false, error: '현재 비밀번호와 새 비밀번호를 입력하세요.' }, 400)
+  }
+  if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{8,}$/.test(new_password)) {
+    return c.json({ success: false, error: '비밀번호는 8자 이상, 대소문자·숫자·특수문자를 포함해야 합니다.' }, 400)
+  }
+
+  // JWT에서 admin ID 추출
+  const adminId = (c.get('jwtPayload' as any) as any)?.sub || ''
+
+  // 로컬 fallback: .dev.vars 계정
+  if (!isSupabaseConfigured(c.env) || adminId === 'local-super-admin') {
+    const localHash = c.env.LOCAL_SUPER_ADMIN_PASSWORD_HASH || ''
+    const isValid = localHash ? await bcrypt.compare(current_password, localHash) : current_password === 'Admin1234!'
+    if (!isValid) return c.json({ success: false, error: '현재 비밀번호가 올바르지 않습니다.' }, 401)
+
+    const newHash = await bcrypt.hash(new_password, SALT_ROUNDS)
+    console.log('[super/password] 로컬 비밀번호 변경 (메모리 저장, 재시작 시 초기화):', newHash.substring(0, 7))
+    return c.json({ success: true, message: '비밀번호가 변경되었습니다.' })
   }
 
   const supabase = createSupabaseAdmin(c.env)
-  const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
-  if (body.price !== undefined) updateData.price = body.price
-  if (body.faq_limit !== undefined) updateData.faq_limit = body.faq_limit
-  if (body.chat_limit !== undefined) updateData.chat_limit = body.chat_limit
+  try {
+    const { data: admin, error: fetchErr } = await supabase
+      .from('admins').select('id, password').eq('id', adminId).single()
 
-  const { error } = await supabase.from('plans').update(updateData).eq('id', planId)
-  if (error) return c.json({ success: false, error: error.message }, 500)
+    if (fetchErr && isNetworkOrInternalError(fetchErr.message)) {
+      return c.json({ success: false, error: 'Supabase 연결 실패. 로컬 계정에서 다시 시도해주세요.' }, 503)
+    }
+    if (!admin) return c.json({ success: false, error: '관리자 정보를 찾을 수 없습니다.' }, 404)
 
-  return c.json({ success: true, message: '플랜이 수정되었습니다.' })
+    const isValid = await bcrypt.compare(current_password, admin.password)
+    if (!isValid) return c.json({ success: false, error: '현재 비밀번호가 올바르지 않습니다.' }, 401)
+
+    const newHash = await bcrypt.hash(new_password, SALT_ROUNDS)
+    const { error: updateErr } = await supabase.from('admins').update({ password: newHash }).eq('id', adminId)
+    if (updateErr) return c.json({ success: false, error: updateErr.message }, 500)
+    return c.json({ success: true, message: '비밀번호가 변경되었습니다.' })
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 500)
+  }
+})
+
+// ─────────────────────────────────────────
+// [10] API 플랫폼 목록
+// GET /api/super/platform-apis
+// ─────────────────────────────────────────
+superRouter.get('/platform-apis', async (c) => {
+  if (!isSupabaseConfigured(c.env)) {
+    return c.json({ success: true, data: localPlatformApiStore })
+  }
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { data, error } = await supabase
+      .from('platform_apis')
+      .select('*')
+      .order('created_at', { ascending: true })
+    if (error && isNetworkOrInternalError(error.message)) {
+      return c.json({ success: true, data: localPlatformApiStore })
+    }
+    if (error) return c.json({ success: false, error: error.message }, 500)
+    // DB에 없으면 로컬 fallback 반환
+    return c.json({ success: true, data: data?.length ? data : localPlatformApiStore })
+  } catch {
+    return c.json({ success: true, data: localPlatformApiStore })
+  }
+})
+
+// ─────────────────────────────────────────
+// [11] API 플랫폼 추가
+// POST /api/super/platform-apis
+// ─────────────────────────────────────────
+superRouter.post('/platform-apis', async (c) => {
+  let body: {
+    platform_name?: string
+    display_name?: string
+    api_endpoint?: string
+    auth_type?: string
+    description?: string
+  }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
+
+  const { platform_name, display_name, api_endpoint, auth_type = 'bearer', description = '' } = body
+  if (!platform_name?.trim() || !display_name?.trim()) {
+    return c.json({ success: false, error: '플랫폼명과 표시명은 필수입니다.' }, 400)
+  }
+
+  const createLocal = () => {
+    const dup = localPlatformApiStore.find(p => p.platform_name === platform_name!.trim())
+    if (dup) return c.json({ success: false, error: '이미 존재하는 플랫폼명입니다.' }, 409)
+
+    const newPlatform: LocalPlatformApi = {
+      id: `local-platform-${Date.now()}`,
+      platform_name: platform_name!.trim(),
+      display_name: display_name!.trim(),
+      api_endpoint: api_endpoint || '',
+      auth_type,
+      description,
+      is_active: false,
+      created_at: new Date().toISOString(),
+    }
+    localPlatformApiStore.push(newPlatform)
+    return c.json({ success: true, data: newPlatform, message: '플랫폼이 추가되었습니다.' }, 201)
+  }
+
+  if (!isSupabaseConfigured(c.env)) return createLocal()
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { data: newPlatform, error } = await supabase
+      .from('platform_apis')
+      .insert({ platform_name: platform_name!.trim(), display_name: display_name!.trim(), api_endpoint, auth_type, description, is_active: false })
+      .select().single()
+    if (error && isNetworkOrInternalError(error.message)) return createLocal()
+    if (error) return c.json({ success: false, error: error.message }, 500)
+    return c.json({ success: true, data: newPlatform, message: '플랫폼이 추가되었습니다.' }, 201)
+  } catch {
+    return createLocal()
+  }
+})
+
+// ─────────────────────────────────────────
+// [12] API 플랫폼 수정 (활성/비활성 등)
+// PUT /api/super/platform-apis/:id
+// ─────────────────────────────────────────
+superRouter.put('/platform-apis/:id', async (c) => {
+  const platformId = c.req.param('id')
+  let body: { is_active?: boolean; display_name?: string; api_endpoint?: string; auth_type?: string; description?: string }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
+
+  // 로컬 메모리 처리
+  const localIdx = localPlatformApiStore.findIndex(p => p.id === platformId)
+  if (localIdx !== -1) {
+    const p = localPlatformApiStore[localIdx]
+    if (body.is_active !== undefined) p.is_active = body.is_active
+    if (body.display_name) p.display_name = body.display_name
+    if (body.api_endpoint !== undefined) p.api_endpoint = body.api_endpoint
+    if (body.auth_type) p.auth_type = body.auth_type
+    if (body.description !== undefined) p.description = body.description
+    return c.json({ success: true, message: '플랫폼이 수정되었습니다.' })
+  }
+
+  if (!isSupabaseConfigured(c.env)) return c.json({ success: false, error: '플랫폼을 찾을 수 없습니다.' }, 404)
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const updateData: Record<string, unknown> = {}
+    if (body.is_active !== undefined) updateData.is_active = body.is_active
+    if (body.display_name) updateData.display_name = body.display_name
+    if (body.api_endpoint !== undefined) updateData.api_endpoint = body.api_endpoint
+    if (body.auth_type) updateData.auth_type = body.auth_type
+    if (body.description !== undefined) updateData.description = body.description
+
+    const { error } = await supabase.from('platform_apis').update(updateData).eq('id', platformId)
+    if (error && isNetworkOrInternalError(error.message)) {
+      return c.json({ success: false, error: 'Supabase 연결 실패' }, 503)
+    }
+    if (error) return c.json({ success: false, error: error.message }, 500)
+    return c.json({ success: true, message: '플랫폼이 수정되었습니다.' })
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 500)
+  }
 })
 
 export default superRouter

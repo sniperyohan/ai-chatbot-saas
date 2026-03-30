@@ -27,16 +27,18 @@ async function superRequest<T>(
 }
 
 export const superApi = {
-  // 로그인
+  // ── 인증 ────────────────────────────────────────
   login: (email: string, password: string) =>
     superRequest<any>('POST', '/login', { email, password }),
 
-  // 대시보드
+  // ── 대시보드 ─────────────────────────────────────
   getDashboard: () => superRequest<any>('GET', '/dashboard'),
 
-  // 고객사 CRUD
+  // ── 고객사 CRUD ──────────────────────────────────
   getTenants: (params: Record<string, string | number> = {}) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString()
+    const q = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]))
+    ).toString()
     return superRequest<any>('GET', `/tenants${q ? '?' + q : ''}`)
   },
   createTenant: (data: { company_name: string; email: string; plan: string }) =>
@@ -46,8 +48,32 @@ export const superApi = {
   deleteTenant: (id: string) =>
     superRequest<any>('DELETE', `/tenants/${id}`),
 
-  // 플랜
+  // ── 고객사 상태/플랜/비밀번호 ────────────────────
+  updateTenantPlan: (id: string, plan: string) =>
+    superRequest<any>('PUT', `/tenants/${id}/plan`, { plan }),
+  updateTenantStatus: (id: string, is_active: boolean) =>
+    superRequest<any>('PUT', `/tenants/${id}/status`, { is_active }),
+  resetTenantPassword: (id: string) =>
+    superRequest<any>('POST', `/tenants/${id}/reset-password`),
+
+  // ── 플랜 ────────────────────────────────────────
   getPlans: () => superRequest<any>('GET', '/plans'),
   updatePlan: (id: string, data: Record<string, unknown>) =>
     superRequest<any>('PUT', `/plans/${id}`, data),
+
+  // ── 슈퍼관리자 비밀번호 변경 ──────────────────────
+  changePassword: (current_password: string, new_password: string) =>
+    superRequest<any>('PUT', '/password', { current_password, new_password }),
+
+  // ── API 플랫폼 ────────────────────────────────────
+  getPlatformApis: () => superRequest<any>('GET', '/platform-apis'),
+  createPlatformApi: (data: {
+    platform_name: string
+    display_name: string
+    api_endpoint?: string
+    auth_type?: string
+    description?: string
+  }) => superRequest<any>('POST', '/platform-apis', data),
+  updatePlatformApi: (id: string, data: Record<string, unknown>) =>
+    superRequest<any>('PUT', `/platform-apis/${id}`, data),
 }
