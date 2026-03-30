@@ -4,7 +4,9 @@
   "scripts": {
     "dev": "vite",
     "dev:sandbox": "wrangler pages dev dist --ip 0.0.0.0 --port 3000",
-    "build": "vite build",
+    "build": "npm run build:admin && npm run build:worker",
+    "build:worker": "npx vite build",
+    "build:admin": "npx vite build --config vite.admin.config.ts",
     "preview": "wrangler pages dev dist",
     "deploy": "npm run build && wrangler pages deploy dist",
     "deploy:prod": "npm run build && wrangler pages deploy dist --project-name ai-chatbot-saas",
@@ -17,14 +19,26 @@
     "bcryptjs": "^3.0.3",
     "hono": "^4.12.9",
     "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^1.7.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-is": "^19.2.4",
+    "react-router-dom": "^7.13.2",
+    "recharts": "^3.8.1",
     "sanitize-html": "^2.17.2"
   },
   "devDependencies": {
     "@hono/vite-build": "^1.2.0",
     "@hono/vite-dev-server": "^0.18.2",
+    "@tailwindcss/vite": "^4.2.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/sanitize-html": "^2.16.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.27",
+    "tailwindcss": "^4.2.2",
     "vite": "^6.3.5",
     "wrangler": "^4.4.0"
   }
