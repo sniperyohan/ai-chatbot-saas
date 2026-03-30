@@ -27,6 +27,80 @@ import { superAuthMiddleware } from '../middleware/auth'
 import { Bindings, Variables } from '../types'
 
 const superRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>()
+
+// ─── 인증 불필요 라우트 (init-db) ─────────────────────────────────
+superRouter.get('/init-db-public', async (c) => {
+  // 보안 토큰 체크 (URL 쿼리로 간단히)
+  const secret = c.req.query('secret')
+  if (secret !== 'init-2026') {
+    return c.json({ success: false, error: '접근 불가' }, 403)
+  }
+  if (!isSupabaseConfiguredInternal(c.env)) {
+    return c.json({ success: false, error: 'Supabase가 설정되지 않았습니다.' })
+  }
+  const supabase = createSupabaseAdmin(c.env)
+  const results: Record<string, string> = {}
+
+  async function tryInsert(name: string, data: any) {
+    try {
+      const { error: selErr } = await supabase.from(name).select('id').limit(1)
+      if (!selErr) { results[name] = '✅ 테이블 접근 가능'; return }
+      results[name] = `⚠️ 테이블 없음: ${selErr.message}`
+    } catch (e: any) { results[name] = `❌ ${e.message}` }
+  }
+
+  // 테이블 존재 여부 확인
+  for (const t of ['admins','plans','tenants','payment_settings','platform_apis','chat_logs','documents','scenarios','integrations']) {
+    await tryInsert(t, null)
+  }
+
+  // plans 기본값 삽입 시도
+  try {
+    for (const p of [
+      { plan_name: 'basic',  price: 99000,  faq_limit: 50,  chat_limit: 1000, description: 'FAQ 50개, 월 1,000회 답변' },
+      { plan_name: 'pro',    price: 199000, faq_limit: 200, chat_limit: 5000, description: 'FAQ 200개, 월 5,000회 답변' },
+      { plan_name: 'master', price: 399000, faq_limit: -1,  chat_limit: -1,   description: 'FAQ 무제한, 월 답변 무제한' },
+    ]) {
+      await supabase.from('plans').upsert(p, { onConflict: 'plan_name', ignoreDuplicates: true })
+    }
+    results['plans_seed'] = '✅ plans upsert 완료'
+  } catch (e: any) { results['plans_seed'] = `❌ ${e.message}` }
+
+  // admins 슈퍼관리자 삽입
+  try {
+    const email = c.env.LOCAL_SUPER_ADMIN_EMAIL || 'super@admin.local'
+    const hash  = c.env.LOCAL_SUPER_ADMIN_PASSWORD_HASH || ''
+    if (hash) {
+      const { error } = await supabase.from('admins').upsert(
+        { email, password: hash, role: 'super_admin' },
+        { onConflict: 'email', ignoreDuplicates: true }
+      )
+      results['admin_seed'] = error ? `⚠️ ${error.message}` : `✅ 슈퍼관리자 생성 (${email})`
+    } else {
+      results['admin_seed'] = '⚠️ LOCAL_SUPER_ADMIN_PASSWORD_HASH 미설정'
+    }
+  } catch (e: any) { results['admin_seed'] = `❌ ${e.message}` }
+
+  // platform_apis 기본값 삽입
+  try {
+    for (const p of [
+      { platform_name: 'cafe24',      display_name: 'Cafe24',           api_endpoint: 'https://api.cafe24.com/api/v2',          auth_type: 'oauth2',  description: 'Cafe24 쇼핑몰 연동',      is_active: true },
+      { platform_name: 'smartstore',  display_name: 'Naver Smartstore', api_endpoint: 'https://api.commerce.naver.com/external', auth_type: 'oauth2',  description: '네이버 스마트스토어 연동', is_active: true },
+      { platform_name: 'imweb',       display_name: 'imweb',            api_endpoint: 'https://api.imweb.me/v2',                auth_type: 'api_key', description: 'imweb 쇼핑몰 연동',       is_active: true },
+      { platform_name: 'godomall',    display_name: 'Godomall',         api_endpoint: 'https://api.godo.co.kr',                 auth_type: 'api_key', description: '고도몰 연동',             is_active: true },
+      { platform_name: 'woocommerce', display_name: 'WooCommerce',      api_endpoint: '',                                        auth_type: 'api_key', description: 'WooCommerce 연동',        is_active: true },
+      { platform_name: 'kakao',       display_name: 'Kakao Channel',    api_endpoint: 'https://kapi.kakao.com',                 auth_type: 'oauth2',  description: '카카오 채널 연동',        is_active: true },
+      { platform_name: 'custom',      display_name: 'Custom API',       api_endpoint: '',                                        auth_type: 'api_key', description: '커스텀 API 연동',         is_active: true },
+    ]) {
+      await supabase.from('platform_apis').upsert(p, { onConflict: 'platform_name', ignoreDuplicates: true })
+    }
+    results['platform_seed'] = '✅ platform_apis upsert 완료'
+  } catch (e: any) { results['platform_seed'] = `❌ ${e.message}` }
+
+  return c.json({ success: true, message: 'DB 초기화 점검 완료', results })
+})
+
+// ─── 인증 필요 라우트 ─────────────────────────────────────────────
 superRouter.use('*', superAuthMiddleware)
 
 const SALT_ROUNDS = 12
@@ -42,6 +116,7 @@ function isSupabaseConfigured(env: Bindings): boolean {
     !env.SUPABASE_SERVICE_KEY.includes('your_supabase')
   )
 }
+const isSupabaseConfiguredInternal = isSupabaseConfigured
 
 // ─────────────────────────────────────────
 // 네트워크/DNS 오류 감지
@@ -54,7 +129,10 @@ function isNetworkOrInternalError(msg: string): boolean {
     msg.includes('Failed to fetch') ||
     msg.includes('network') ||
     msg.includes('ENOTFOUND') ||
-    msg.includes('Name or service not known')
+    msg.includes('Name or service not known') ||
+    msg.includes('error code: 1016') ||
+    msg.includes('relation') ||
+    msg.includes('does not exist')
   )
 }
 
@@ -1278,6 +1356,70 @@ superRouter.put('/payment-settings', async (c) => {
   } catch {
     return saveLocal()
   }
+})
+
+// ─────────────────────────────────────────────────────
+// GET /api/super/init-db  ← Supabase 테이블 초기화
+// ─────────────────────────────────────────────────────
+superRouter.get('/init-db', async (c) => {
+  if (!isSupabaseConfigured(c.env)) {
+    return c.json({ success: false, error: 'Supabase가 설정되지 않았습니다.' })
+  }
+  const supabase = createSupabaseAdmin(c.env)
+
+  const results: Record<string, string> = {}
+
+  // helper: SQL 실행 (Supabase rpc 우회, 개별 insert/select로 테이블 존재 확인 후 생성)
+  async function ensureTable(name: string, createSql: string) {
+    try {
+      const { error } = await supabase.from(name).select('id').limit(1)
+      if (!error) { results[name] = '✅ 이미 존재'; return }
+      // 테이블 없음 → rpc로 생성 시도
+      const { error: rpcErr } = await (supabase as any).rpc('exec_ddl', { sql: createSql })
+      results[name] = rpcErr ? `⚠️ rpc 오류: ${rpcErr.message}` : '✅ 생성됨'
+    } catch (e: any) { results[name] = `❌ ${e.message}` }
+  }
+
+  // admins 테이블 확인
+  await ensureTable('admins', `CREATE TABLE IF NOT EXISTS admins (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text UNIQUE NOT NULL, password text NOT NULL, role text DEFAULT 'super_admin', created_at timestamptz DEFAULT now())`)
+  // plans
+  await ensureTable('plans', `CREATE TABLE IF NOT EXISTS plans (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), plan_name text UNIQUE NOT NULL, price integer NOT NULL DEFAULT 0, faq_limit integer NOT NULL DEFAULT 50, chat_limit integer NOT NULL DEFAULT 1000, description text, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now())`)
+  // tenants
+  await ensureTable('tenants', `CREATE TABLE IF NOT EXISTS tenants (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), company_name text NOT NULL, email text UNIQUE NOT NULL, password text NOT NULL, plan text NOT NULL DEFAULT 'basic', is_active boolean DEFAULT true, is_deleted boolean DEFAULT false, bot_name text DEFAULT 'AI 상담봇', greeting_message text, widget_color text DEFAULT '#4F46E5', supported_languages text[], login_failed_count integer DEFAULT 0, login_locked_until timestamptz, subscription_start_date date, subscription_end_date date, subscription_status text DEFAULT 'active', payment_memo text, payment_requested_at timestamptz, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now())`)
+  // payment_settings
+  await ensureTable('payment_settings', `CREATE TABLE IF NOT EXISTS payment_settings (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bank_name text, account_number text, account_holder text, payment_guide text, updated_at timestamptz DEFAULT now())`)
+  // platform_apis
+  await ensureTable('platform_apis', `CREATE TABLE IF NOT EXISTS platform_apis (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), platform_name text UNIQUE NOT NULL, display_name text NOT NULL, api_endpoint text, auth_type text DEFAULT 'api_key', description text, is_active boolean DEFAULT true, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now())`)
+
+  // plans 기본값 삽입
+  try {
+    const plansData = [
+      { plan_name: 'basic',  price: 99000,  faq_limit: 50,  chat_limit: 1000, description: 'FAQ 50개, 월 1,000회 답변' },
+      { plan_name: 'pro',    price: 199000, faq_limit: 200, chat_limit: 5000, description: 'FAQ 200개, 월 5,000회 답변' },
+      { plan_name: 'master', price: 399000, faq_limit: -1,  chat_limit: -1,   description: 'FAQ 무제한, 월 답변 무제한' },
+    ]
+    for (const p of plansData) {
+      await supabase.from('plans').upsert(p, { onConflict: 'plan_name', ignoreDuplicates: true })
+    }
+    results['plans_seed'] = '✅ 기본 플랜 삽입'
+  } catch (e: any) { results['plans_seed'] = `❌ ${e.message}` }
+
+  // admins 슈퍼관리자 계정 삽입 (LOCAL_SUPER_ADMIN_EMAIL/HASH 기반)
+  try {
+    const email = c.env.LOCAL_SUPER_ADMIN_EMAIL || 'super@admin.local'
+    const hash  = c.env.LOCAL_SUPER_ADMIN_PASSWORD_HASH || ''
+    if (hash) {
+      const { error } = await supabase.from('admins').upsert(
+        { email, password: hash, role: 'super_admin' },
+        { onConflict: 'email', ignoreDuplicates: true }
+      )
+      results['admin_seed'] = error ? `⚠️ ${error.message}` : `✅ 슈퍼관리자 생성 (${email})`
+    } else {
+      results['admin_seed'] = '⚠️ LOCAL_SUPER_ADMIN_PASSWORD_HASH 미설정'
+    }
+  } catch (e: any) { results['admin_seed'] = `❌ ${e.message}` }
+
+  return c.json({ success: true, message: 'DB 초기화 완료', results })
 })
 
 export default superRouter

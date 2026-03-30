@@ -102,9 +102,12 @@ auth.post('/super/login', async (c) => {
       errMsg.includes('DNS') ||
       errMsg.includes('fetch failed') ||
       errMsg.includes('Failed to fetch') ||
-      errMsg.includes('network')
+      errMsg.includes('network') ||
+      errMsg.includes('error code: 1016') ||  // 테이블 없음 → fallback
+      errMsg.includes('relation') ||           // relation does not exist
+      errMsg.includes('does not exist')        // table does not exist
     )) {
-      console.warn('[DEBUG][super/login] ⚠️ Supabase internal/네트워크 오류 감지, 로컬 fallback으로 전환:', errMsg)
+      console.warn('[DEBUG][super/login] ⚠️ Supabase 오류 감지, 로컬 fallback으로 전환:', errMsg)
       isNetworkError = true
     }
 
