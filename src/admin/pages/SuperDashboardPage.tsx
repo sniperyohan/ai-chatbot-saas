@@ -23,6 +23,10 @@ interface Tenant {
   is_active: boolean
   created_at: string
   bot_name?: string
+  subscription_start_date?: string | null
+  subscription_end_date?: string | null
+  subscription_status?: 'active' | 'pending' | 'expired'
+  payment_requested_at?: string | null
 }
 
 interface DashboardStats {
@@ -63,6 +67,50 @@ const PLAN_LABELS: Record<string, string> = {
   basic: 'Basic · ₩99,000/월 · FAQ 50개 · 월 1,000회 답변',
   pro:   'Pro · ₩199,000/월 · FAQ 200개 · 월 5,000회 답변',
   master:'Master · ₩399,000/월 · FAQ 무제한 · 월 답변 무제한',
+}
+const PLAN_PRICE: Record<string, number> = { basic: 99000, pro: 199000, master: 399000 }
+
+// D-day 계산: 양수=남은 일수, 음수=만료됨, null=날짜없음
+function calcDday(endDateStr: string | null | undefined): number | null {
+  if (!endDateStr) return null
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const end = new Date(endDateStr); end.setHours(0, 0, 0, 0)
+  return Math.floor((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function formatDateKo(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`
+}
+
+function DdayBadge({ endDate }: { endDate: string | null | undefined }) {
+  const dday = calcDday(endDate)
+  if (dday === null) return <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>—</span>
+  if (dday < 0) return (
+    <span style={{ color: '#EF4444', fontWeight: 700, fontSize: '12px', background: '#FEF2F2', padding: '2px 8px', borderRadius: '12px' }}>만료</span>
+  )
+  if (dday === 0) return (
+    <span style={{ color: '#EF4444', fontWeight: 700, fontSize: '12px', background: '#FEF2F2', padding: '2px 8px', borderRadius: '12px' }}>D-0</span>
+  )
+  if (dday <= 7) return (
+    <span style={{ color: '#D97706', fontWeight: 700, fontSize: '12px', background: 'rgba(245,158,11,0.12)', padding: '2px 8px', borderRadius: '12px' }}>D-{dday}</span>
+  )
+  return (
+    <span style={{ color: '#059669', fontWeight: 700, fontSize: '12px', background: 'rgba(5,150,105,0.1)', padding: '2px 8px', borderRadius: '12px' }}>D-{dday}</span>
+  )
+}
+
+function PaymentStatusBadge({ status, requestedAt }: { status?: string; requestedAt?: string | null }) {
+  if (status === 'pending' || requestedAt) return (
+    <span style={{ color: '#D97706', fontWeight: 600, fontSize: '12px', background: 'rgba(245,158,11,0.12)', padding: '2px 8px', borderRadius: '12px' }}>입금 대기</span>
+  )
+  if (status === 'expired') return (
+    <span style={{ color: '#EF4444', fontWeight: 600, fontSize: '12px', background: '#FEF2F2', padding: '2px 8px', borderRadius: '12px' }}>만료</span>
+  )
+  return (
+    <span style={{ color: '#059669', fontWeight: 600, fontSize: '12px', background: 'rgba(5,150,105,0.1)', padding: '2px 8px', borderRadius: '12px' }}>입금 확인</span>
+  )
 }
 
 // ════════════════════════════════════════════════════════
@@ -790,12 +838,14 @@ function ChangePasswordModal({ onClose, onLogout }: {
 // ════════════════════════════════════════════════════════
 // 관리 드롭다운 메뉴 (position:fixed — 테이블 overflow 잘림 방지)
 // ════════════════════════════════════════════════════════
-function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete }: {
+function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete, onExtend, onConfirmPayment }: {
   tenant: Tenant
   onPlan: () => void
   onStatus: () => void
   onResetPw: () => void
   onDelete: () => void
+  onExtend: () => void
+  onConfirmPayment: () => void
 }) {
   const [open, setOpen] = useState(false)
   // fixed 위치 좌표 (버튼 bottom 기준)
@@ -852,6 +902,20 @@ function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete }: {
       bg: tenant.is_active ? 'rgba(107,114,128,0.06)' : 'rgba(5,150,105,0.06)',
       hoverBg: tenant.is_active ? 'rgba(107,114,128,0.12)' : 'rgba(5,150,105,0.12)',
       onClick: () => { setOpen(false); onStatus() },
+    },
+    {
+      label: '1개월 연장',
+      color: '#7C3AED',
+      bg: 'rgba(124,58,237,0.06)',
+      hoverBg: 'rgba(124,58,237,0.12)',
+      onClick: () => { setOpen(false); onExtend() },
+    },
+    {
+      label: '입금 확인',
+      color: '#059669',
+      bg: 'rgba(5,150,105,0.06)',
+      hoverBg: 'rgba(5,150,105,0.12)',
+      onClick: () => { setOpen(false); onConfirmPayment() },
     },
     {
       label: '비밀번호 초기화',
@@ -948,6 +1012,91 @@ function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete }: {
 // ════════════════════════════════════════════════════════
 // 탭: 고객사 목록
 // ════════════════════════════════════════════════════════
+
+// [모달5] 구독 연장 확인 모달
+function ExtendModal({ tenant, onClose, onSuccess }: {
+  tenant: Tenant; onClose: () => void; onSuccess: (msg: string) => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+  async function handleExtend() {
+    setLoading(true); setErr('')
+    try {
+      const res = await superApi.extendTenantSubscription(tenant.id)
+      onSuccess(`${tenant.company_name} 구독이 1개월 연장되었습니다. (만료일: ${res.data?.subscription_end_date || ''})`)
+      onClose()
+    } catch (e: any) { setErr(e.message) }
+    finally { setLoading(false) }
+  }
+  return (
+    <ModalWrap onClose={onClose} maxWidth={400}>
+      <ModalHeader title="구독 1개월 연장" onClose={onClose} />
+      <div style={{ padding: '20px 24px 24px' }}>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '16px' }}>
+          <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: 'rgba(124,58,237,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: '20px' }}>📅</span>
+          </div>
+          <p style={{ fontSize: '14px', color: 'var(--text-primary)', margin: 0, lineHeight: 1.6 }}>
+            <strong>{tenant.company_name}</strong>의 구독을 1개월 연장합니다.<br />
+            <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+              현재 만료일: {formatDateKo(tenant.subscription_end_date)}
+            </span>
+          </p>
+        </div>
+        <ErrBox msg={err} />
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={onClose} disabled={loading} style={{ ...S.btnSecondary, flex: 1 }}>취소</button>
+          <button onClick={handleExtend} disabled={loading} style={{ ...S.btnPrimary, flex: 1, background: '#7C3AED', opacity: loading ? 0.8 : 1 }}>
+            {loading ? <><Spinner /> 연장 중...</> : '1개월 연장'}
+          </button>
+        </div>
+      </div>
+    </ModalWrap>
+  )
+}
+
+// [모달6] 입금 확인 모달
+function ConfirmPaymentModal({ tenant, onClose, onSuccess }: {
+  tenant: Tenant; onClose: () => void; onSuccess: (msg: string) => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+  async function handleConfirm() {
+    setLoading(true); setErr('')
+    try {
+      const res = await superApi.confirmTenantPayment(tenant.id)
+      onSuccess(`${tenant.company_name} 입금 확인 및 1개월 연장 완료 (만료일: ${res.data?.subscription_end_date || ''})`)
+      onClose()
+    } catch (e: any) { setErr(e.message) }
+    finally { setLoading(false) }
+  }
+  return (
+    <ModalWrap onClose={onClose} maxWidth={400}>
+      <ModalHeader title="입금 확인" onClose={onClose} />
+      <div style={{ padding: '20px 24px 24px' }}>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '16px' }}>
+          <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: 'rgba(5,150,105,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: '20px' }}>✅</span>
+          </div>
+          <p style={{ fontSize: '14px', color: 'var(--text-primary)', margin: 0, lineHeight: 1.6 }}>
+            <strong>{tenant.company_name}</strong>의 입금을 확인하고<br />구독을 1개월 연장합니다.
+            {tenant.payment_requested_at && (
+              <><br /><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>입금 요청: {formatDateKo(tenant.payment_requested_at)}</span></>
+            )}
+          </p>
+        </div>
+        <ErrBox msg={err} />
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={onClose} disabled={loading} style={{ ...S.btnSecondary, flex: 1 }}>취소</button>
+          <button onClick={handleConfirm} disabled={loading} style={{ ...S.btnPrimary, flex: 1, background: '#059669', opacity: loading ? 0.8 : 1 }}>
+            {loading ? <><Spinner /> 처리 중...</> : '입금 확인 완료'}
+          </button>
+        </div>
+      </div>
+    </ModalWrap>
+  )
+}
+
 function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success' | 'error') => void }) {
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [total, setTotal] = useState(0)
@@ -964,6 +1113,8 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
   const [planModal, setPlanModal] = useState<Tenant | null>(null)
   const [resetPwModal, setResetPwModal] = useState<Tenant | null>(null)
   const [deleteModal, setDeleteModal] = useState<Tenant | null>(null)
+  const [extendModal, setExtendModal] = useState<Tenant | null>(null)
+  const [confirmPayModal, setConfirmPayModal] = useState<Tenant | null>(null)
 
   const loadTenants = useCallback(async (p = 1, s = '', plan = '', status = '') => {
     setLoading(true)
@@ -1121,7 +1272,7 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
             <thead>
               <tr style={{ background: 'var(--bg-primary)' }}>
-                {['회사명', '이메일', '플랜', '상태', '생성일', '관리'].map(h => (
+                {['회사명', '이메일', '플랜', '상태', '구독 시작일', '만료일', 'D-day', '결제 상태', '생성일', '관리'].map(h => (
                   <th key={h} style={{
                     padding: '10px 16px', textAlign: 'left', fontWeight: 600,
                     color: 'var(--text-secondary)', whiteSpace: 'nowrap',
@@ -1136,7 +1287,7 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 6 }).map((_, j) => (
+                    {Array.from({ length: 10 }).map((_, j) => (
                       <td key={j} style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
                         <div style={{
                           height: '14px', borderRadius: '6px',
@@ -1150,7 +1301,7 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
                 ))
               ) : tenants.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: '48px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                  <td colSpan={10} style={{ padding: '48px', textAlign: 'center', color: 'var(--text-secondary)' }}>
                     <Building2 size={36} style={{ marginBottom: '12px', opacity: 0.3, display: 'block', margin: '0 auto 12px' }} />
                     {search || planFilter || statusFilter ? '검색/필터 결과가 없습니다.' : '등록된 고객사가 없습니다.'}
                   </td>
@@ -1195,6 +1346,18 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
                         </span>
                       </td>
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
+                        {formatDateKo(tenant.subscription_start_date)}
+                      </td>
+                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
+                        {formatDateKo(tenant.subscription_end_date)}
+                      </td>
+                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                        <DdayBadge endDate={tenant.subscription_end_date} />
+                      </td>
+                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                        <PaymentStatusBadge status={tenant.subscription_status} requestedAt={tenant.payment_requested_at} />
+                      </td>
+                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
                         {formatDate(tenant.created_at)}
                       </td>
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
@@ -1204,6 +1367,8 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
                           onStatus={() => handleStatusToggle(tenant)}
                           onResetPw={() => setResetPwModal(tenant)}
                           onDelete={() => setDeleteModal(tenant)}
+                          onExtend={() => setExtendModal(tenant)}
+                          onConfirmPayment={() => setConfirmPayModal(tenant)}
                         />
                       </td>
                     </tr>
@@ -1288,6 +1453,20 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
           onSuccess={msg => { onShowToast(msg); loadTenants(page, search, planFilter, statusFilter); setDeleteModal(null) }}
         />
       )}
+      {extendModal && (
+        <ExtendModal
+          tenant={extendModal}
+          onClose={() => setExtendModal(null)}
+          onSuccess={msg => { onShowToast(msg, 'success'); loadTenants(page, search, planFilter, statusFilter); setExtendModal(null) }}
+        />
+      )}
+      {confirmPayModal && (
+        <ConfirmPaymentModal
+          tenant={confirmPayModal}
+          onClose={() => setConfirmPayModal(null)}
+          onSuccess={msg => { onShowToast(msg, 'success'); loadTenants(page, search, planFilter, statusFilter); setConfirmPayModal(null) }}
+        />
+      )}
     </div>
   )
 }
@@ -1295,6 +1474,260 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
 // ════════════════════════════════════════════════════════
 // 탭: 플랜 관리
 // ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// 탭: 미납 현황
+// ════════════════════════════════════════════════════════
+function UnpaidTab({ onShowToast }: { onShowToast: (msg: string, type: 'success' | 'error') => void }) {
+  const [tenants, setTenants] = useState<Tenant[]>([])
+  const [loading, setLoading] = useState(true)
+  const [confirmPayModal, setConfirmPayModal] = useState<Tenant | null>(null)
+
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    try {
+      // 전체 목록 가져와서 만료 7일 이내 또는 만료된 것만 필터
+      const res = await superApi.getTenants({ page: 1, limit: 100 })
+      const all: Tenant[] = res.data?.items || []
+      const filtered = all.filter(t => {
+        const dday = calcDday(t.subscription_end_date)
+        return dday !== null && dday <= 7
+      })
+      setTenants(filtered)
+    } catch (e: any) {
+      onShowToast(e.message || '데이터 로드 실패', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadData() }, [])
+
+  // 요약 통계
+  const imminent = tenants.filter(t => { const d = calcDday(t.subscription_end_date); return d !== null && d >= 0 && d <= 7 })
+  const expired = tenants.filter(t => { const d = calcDday(t.subscription_end_date); return d !== null && d < 0 })
+  const monthlyRevenue = tenants
+    .filter(t => t.is_active)
+    .reduce((sum, t) => sum + (PLAN_PRICE[t.plan] || 0), 0)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* 요약 카드 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+        <div style={{ ...S.card, borderLeft: '4px solid #F59E0B' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>만료 임박 (7일 이내)</div>
+          <div style={{ fontSize: '28px', fontWeight: 800, color: '#D97706' }}>{loading ? '—' : imminent.length}<span style={{ fontSize: '14px', fontWeight: 400, marginLeft: '4px' }}>건</span></div>
+        </div>
+        <div style={{ ...S.card, borderLeft: '4px solid #EF4444' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>이미 만료</div>
+          <div style={{ fontSize: '28px', fontWeight: 800, color: '#EF4444' }}>{loading ? '—' : expired.length}<span style={{ fontSize: '14px', fontWeight: 400, marginLeft: '4px' }}>건</span></div>
+        </div>
+        <div style={{ ...S.card, borderLeft: '4px solid #059669' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>이번 달 예상 수익</div>
+          <div style={{ fontSize: '22px', fontWeight: 800, color: '#059669' }}>{loading ? '—' : `₩${monthlyRevenue.toLocaleString()}`}</div>
+        </div>
+      </div>
+
+      {/* 미납 테이블 */}
+      <div style={{ ...S.card, padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+            만료 임박 / 미납 고객사
+          </h2>
+          <button
+            onClick={loadData}
+            style={{ ...S.btnSecondary, minHeight: '36px', padding: '0 12px', fontSize: '13px', gap: '5px' }}
+          >
+            <RefreshCw size={13} /> 새로고침
+          </button>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-primary)' }}>
+                {['업체명', '플랜', '만료일', 'D-day', '결제 상태', '월 요금', '입금 확인'].map(h => (
+                  <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <tr key={i}>
+                    {Array.from({ length: 7 }).map((_, j) => (
+                      <td key={j} style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+                        <div style={{ height: '12px', borderRadius: '6px', background: 'linear-gradient(90deg, var(--border) 25%, var(--bg-primary) 50%, var(--border) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s infinite', width: '80px' }} />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : tenants.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ padding: '48px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                    <Check size={36} style={{ opacity: 0.3, display: 'block', margin: '0 auto 12px' }} />
+                    만료 임박 고객사가 없습니다. 🎉
+                  </td>
+                </tr>
+              ) : tenants.map((t, idx) => {
+                const badge = PLAN_BADGE[t.plan] || PLAN_BADGE.basic
+                const dday = calcDday(t.subscription_end_date)
+                return (
+                  <tr key={t.id} style={{ borderBottom: idx < tenants.length - 1 ? '1px solid var(--border)' : 'none', background: dday !== null && dday < 0 ? '#FFF7F7' : idx % 2 === 0 ? 'var(--bg-secondary)' : 'transparent' }}>
+                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', fontWeight: 600, color: 'var(--text-primary)' }}>{t.company_name}</td>
+                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                      <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, background: badge.bg, color: badge.color }}>
+                        {t.plan.charAt(0).toUpperCase() + t.plan.slice(1)}
+                      </span>
+                    </td>
+                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{formatDateKo(t.subscription_end_date)}</td>
+                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}><DdayBadge endDate={t.subscription_end_date} /></td>
+                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                      <PaymentStatusBadge status={t.subscription_status} requestedAt={t.payment_requested_at} />
+                    </td>
+                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      ₩{(PLAN_PRICE[t.plan] || 0).toLocaleString()}
+                    </td>
+                    <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                      <button
+                        onClick={() => setConfirmPayModal(t)}
+                        style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                      >
+                        입금 확인
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {confirmPayModal && (
+        <ConfirmPaymentModal
+          tenant={confirmPayModal}
+          onClose={() => setConfirmPayModal(null)}
+          onSuccess={msg => { onShowToast(msg, 'success'); loadData(); setConfirmPayModal(null) }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════
+// 탭: 결제 설정
+// ════════════════════════════════════════════════════════
+function PaymentSettingsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success' | 'error') => void }) {
+  const [bankName, setBankName] = useState('')
+  const [accountNumber, setAccountNumber] = useState('')
+  const [accountHolder, setAccountHolder] = useState('')
+  const [paymentGuide, setPaymentGuide] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    superApi.getPaymentSettings()
+      .then(res => {
+        const d = res.data || {}
+        setBankName(d.bank_name || '')
+        setAccountNumber(d.account_number || '')
+        setAccountHolder(d.account_holder || '')
+        setPaymentGuide(d.payment_guide || '')
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleSave() {
+    if (!bankName.trim() || !accountNumber.trim() || !accountHolder.trim()) {
+      onShowToast('은행명, 계좌번호, 예금주는 필수입니다.', 'error'); return
+    }
+    setSaving(true)
+    try {
+      await superApi.updatePaymentSettings({ bank_name: bankName.trim(), account_number: accountNumber.trim(), account_holder: accountHolder.trim(), payment_guide: paymentGuide.trim() })
+      onShowToast('저장되었습니다.', 'success')
+    } catch (e: any) {
+      onShowToast(e.message || '저장 실패', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: '560px' }}>
+      <div style={S.card}>
+        <h2 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '20px', marginTop: 0 }}>
+          💳 입금 계좌 설정
+        </h2>
+        {loading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {[1,2,3,4].map(i => <div key={i} style={{ height: '44px', borderRadius: '8px', background: 'var(--border)', animation: 'shimmer 1.4s infinite' }} />)}
+          </div>
+        ) : (
+          <>
+            <Field label="은행명" required>
+              <input
+                type="text"
+                value={bankName}
+                onChange={e => setBankName(e.target.value)}
+                placeholder="예: 국민은행"
+                style={S.input}
+              />
+            </Field>
+            <Field label="계좌번호" required>
+              <input
+                type="text"
+                value={accountNumber}
+                onChange={e => setAccountNumber(e.target.value)}
+                placeholder="예: 123-456-789012"
+                style={S.input}
+              />
+            </Field>
+            <Field label="예금주" required>
+              <input
+                type="text"
+                value={accountHolder}
+                onChange={e => setAccountHolder(e.target.value)}
+                placeholder="예: 홍길동"
+                style={S.input}
+              />
+            </Field>
+            <Field label="입금 안내 메시지">
+              <textarea
+                value={paymentGuide}
+                onChange={e => setPaymentGuide(e.target.value)}
+                placeholder="입금 후 입금했어요 버튼을 눌러주세요. 확인 후 1시간 이내 처리됩니다."
+                rows={4}
+                style={{ ...S.textarea }}
+              />
+            </Field>
+
+            {/* 미리보기 */}
+            {(bankName || accountNumber) && (
+              <div style={{ padding: '14px 16px', background: 'rgba(79,70,229,0.05)', border: '1px solid rgba(79,70,229,0.2)', borderRadius: '10px', marginBottom: '16px' }}>
+                <p style={{ fontSize: '12px', fontWeight: 700, color: '#4F46E5', margin: '0 0 8px' }}>📋 미리보기</p>
+                <p style={{ fontSize: '13px', color: 'var(--text-primary)', margin: '0 0 4px' }}>
+                  <strong>{bankName}</strong> {accountNumber} ({accountHolder})
+                </p>
+                {paymentGuide && <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>{paymentGuide}</p>}
+              </div>
+            )}
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{ ...S.btnPrimary, width: '100%', opacity: saving ? 0.8 : 1 }}
+            >
+              {saving ? <><Spinner /> 저장 중...</> : '저장하기'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function PlansTab({ onShowToast }: { onShowToast: (msg: string, type: 'success' | 'error') => void }) {
   const [plans, setPlans] = useState<PlanData[]>([])
   const [loading, setLoading] = useState(true)
@@ -1602,7 +2035,7 @@ export default function SuperDashboardPage() {
   const navigate = useNavigate()
   const { admin, logout } = useSuperAuth()
 
-  const [activeTab, setActiveTab] = useState<'tenants' | 'plans' | 'platforms'>('tenants')
+  const [activeTab, setActiveTab] = useState<'tenants' | 'unpaid' | 'plans' | 'platforms' | 'payment'>('tenants')
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loadingStats, setLoadingStats] = useState(true)
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
@@ -1649,9 +2082,11 @@ export default function SuperDashboardPage() {
   function formatRevenue(n: number) { return `₩${n.toLocaleString('ko-KR')}` }
 
   const TABS = [
-    { key: 'tenants',   label: '고객사 관리', icon: <Building2 size={16} /> },
-    { key: 'plans',     label: '플랜 관리',   icon: <Layers size={16} /> },
-    { key: 'platforms', label: 'API 플랫폼',  icon: <Globe size={16} /> },
+    { key: 'tenants',   label: '고객사 관리',  icon: <Building2 size={16} /> },
+    { key: 'unpaid',    label: '미납 현황',    icon: <AlertCircle size={16} /> },
+    { key: 'plans',     label: '플랜 관리',    icon: <Layers size={16} /> },
+    { key: 'platforms', label: 'API 플랫폼',   icon: <Globe size={16} /> },
+    { key: 'payment',   label: '결제 설정',    icon: <Key size={16} /> },
   ] as const
 
   return (
@@ -1809,8 +2244,10 @@ export default function SuperDashboardPage() {
             탭 콘텐츠
         ═══════════════════════════════════════════════ */}
         {activeTab === 'tenants' && <TenantsTab onShowToast={showToast} />}
+        {activeTab === 'unpaid' && <UnpaidTab onShowToast={showToast} />}
         {activeTab === 'plans' && <PlansTab onShowToast={showToast} />}
         {activeTab === 'platforms' && <PlatformsTab onShowToast={showToast} />}
+        {activeTab === 'payment' && <PaymentSettingsTab onShowToast={showToast} />}
       </main>
 
       {/* ═══════════════════════════════════════════════

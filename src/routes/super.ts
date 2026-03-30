@@ -8,12 +8,17 @@
 // PUT    /api/super/tenants/:id/status
 // DELETE /api/super/tenants/:id
 // POST   /api/super/tenants/:id/reset-password
+// POST   /api/super/tenants/:id/extend          ← 구독 1개월 연장
+// POST   /api/super/tenants/:id/confirm-payment ← 입금 확인 + 1개월 연장
 // GET    /api/super/plans
 // PUT    /api/super/plans/:id
 // PUT    /api/super/password
 // GET    /api/super/platform-apis
 // POST   /api/super/platform-apis
 // PUT    /api/super/platform-apis/:id
+// GET    /api/super/payment-settings             ← 계좌 설정 조회
+// PUT    /api/super/payment-settings             ← 계좌 설정 저장
+// GET    /api/super/check-expired                ← 만료 자동 처리
 // =====================================================
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
@@ -67,6 +72,21 @@ interface LocalTenant {
   created_at: string
   widget_color: string
   bot_name: string
+  // 구독 필드
+  subscription_start_date: string | null
+  subscription_end_date: string | null
+  subscription_status: 'active' | 'pending' | 'expired'
+  payment_memo: string | null
+  payment_requested_at: string | null
+}
+
+interface LocalPaymentSettings {
+  id: string
+  bank_name: string
+  account_number: string
+  account_holder: string
+  payment_guide: string
+  updated_at: string
 }
 
 interface LocalPlatformApi {
@@ -81,6 +101,41 @@ interface LocalPlatformApi {
 }
 
 const localTenantStore: LocalTenant[] = []
+
+// 로컬 결제 설정 저장소 (Supabase 없을 때 사용)
+let localPaymentSettings: LocalPaymentSettings = {
+  id: 'local-payment-settings',
+  bank_name: '국민은행',
+  account_number: '123-456-789012',
+  account_holder: '홍길동',
+  payment_guide: '입금 후 입금했어요 버튼을 눌러주세요. 확인 후 1시간 이내 처리됩니다.',
+  updated_at: new Date().toISOString(),
+}
+
+// ─────────────────────────────────────────
+// 구독 날짜 헬퍼: 1개월 연장 (말일 예외처리)
+// ─────────────────────────────────────────
+function addOneMonth(dateStr: string): string {
+  const d = new Date(dateStr)
+  const month = d.getMonth()
+  d.setMonth(month + 1)
+  // 월 오버플로우 처리 (예: 1월 31일 + 1달 = 3월 3일 → 2월 28/29일)
+  if (d.getMonth() !== ((month + 1) % 12)) {
+    d.setDate(0) // 이전 달 마지막 날
+  }
+  return d.toISOString().split('T')[0]
+}
+
+function getTodayStr(): string {
+  return new Date().toISOString().split('T')[0]
+}
+
+function calcDday(endDateStr: string | null): number | null {
+  if (!endDateStr) return null
+  const today = new Date(getTodayStr())
+  const end = new Date(endDateStr)
+  return Math.floor((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+}
 
 // ─────────────────────────────────────────
 // 로컬 fallback 플랫폼 기본 데이터 (7개)
@@ -408,6 +463,7 @@ superRouter.post('/tenants', async (c) => {
     if (dup) return c.json({ success: false, error: '이미 사용 중인 이메일입니다.' }, 409)
 
     const newId = `local-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+    const todayStr = getTodayStr()
     const newTenant: LocalTenant = {
       id: newId,
       company_name: company_name!.trim(),
@@ -418,6 +474,11 @@ superRouter.post('/tenants', async (c) => {
       created_at: new Date().toISOString(),
       widget_color: widget_color || '#4F46E5',
       bot_name: bot_name || 'AI상담봇',
+      subscription_start_date: todayStr,
+      subscription_end_date: addOneMonth(todayStr),
+      subscription_status: 'active',
+      payment_memo: null,
+      payment_requested_at: null,
     }
     localTenantStore.push(newTenant)
     return c.json({
@@ -988,6 +1049,234 @@ superRouter.put('/platform-apis/:id', async (c) => {
     return c.json({ success: true, message: '플랫폼이 수정되었습니다.' })
   } catch (err: any) {
     return c.json({ success: false, error: err.message }, 500)
+  }
+})
+
+// ═══════════════════════════════════════════════════
+// 구독 관리 엔드포인트
+// ═══════════════════════════════════════════════════
+
+// ─────────────────────────────────────────
+// [13] 구독 1개월 연장
+// POST /api/super/tenants/:id/extend
+// ─────────────────────────────────────────
+superRouter.post('/tenants/:id/extend', async (c) => {
+  const tenantId = c.req.param('id')
+
+  const extendLocal = () => {
+    const idx = localTenantStore.findIndex(t => t.id === tenantId && !t.is_deleted)
+    if (idx === -1) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+    const t = localTenantStore[idx]
+    const base = t.subscription_end_date || getTodayStr()
+    t.subscription_end_date = addOneMonth(base)
+    t.subscription_status = 'active'
+    t.is_active = true
+    return c.json({ success: true, message: '구독이 1개월 연장되었습니다.', data: { subscription_end_date: t.subscription_end_date } })
+  }
+
+  const localIdx = localTenantStore.findIndex(t => t.id === tenantId && !t.is_deleted)
+  if (localIdx !== -1) return extendLocal()
+  if (!isSupabaseConfigured(c.env)) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { data: tenant, error: fetchErr } = await supabase
+      .from('tenants').select('id, subscription_end_date').eq('id', tenantId).single()
+    if (fetchErr && isNetworkOrInternalError(fetchErr.message)) return extendLocal()
+    if (fetchErr || !tenant) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+
+    const base = tenant.subscription_end_date || getTodayStr()
+    const newEnd = addOneMonth(base)
+    const { error: updErr } = await supabase.from('tenants').update({
+      subscription_end_date: newEnd,
+      subscription_status: 'active',
+      is_active: true,
+    }).eq('id', tenantId)
+    if (updErr && isNetworkOrInternalError(updErr.message)) return extendLocal()
+    if (updErr) return c.json({ success: false, error: updErr.message }, 500)
+    return c.json({ success: true, message: '구독이 1개월 연장되었습니다.', data: { subscription_end_date: newEnd } })
+  } catch {
+    return extendLocal()
+  }
+})
+
+// ─────────────────────────────────────────
+// [14] 입금 확인 + 1개월 연장
+// POST /api/super/tenants/:id/confirm-payment
+// ─────────────────────────────────────────
+superRouter.post('/tenants/:id/confirm-payment', async (c) => {
+  const tenantId = c.req.param('id')
+
+  const confirmLocal = () => {
+    const idx = localTenantStore.findIndex(t => t.id === tenantId && !t.is_deleted)
+    if (idx === -1) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+    const t = localTenantStore[idx]
+    const base = t.subscription_end_date || getTodayStr()
+    t.subscription_end_date = addOneMonth(base)
+    t.subscription_status = 'active'
+    t.is_active = true
+    t.payment_requested_at = null
+    return c.json({
+      success: true,
+      message: '입금 확인 및 1개월 연장 완료',
+      data: { subscription_end_date: t.subscription_end_date },
+    })
+  }
+
+  const localIdx = localTenantStore.findIndex(t => t.id === tenantId && !t.is_deleted)
+  if (localIdx !== -1) return confirmLocal()
+  if (!isSupabaseConfigured(c.env)) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { data: tenant, error: fetchErr } = await supabase
+      .from('tenants').select('id, subscription_end_date').eq('id', tenantId).single()
+    if (fetchErr && isNetworkOrInternalError(fetchErr.message)) return confirmLocal()
+    if (fetchErr || !tenant) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
+
+    const base = tenant.subscription_end_date || getTodayStr()
+    const newEnd = addOneMonth(base)
+    const { error: updErr } = await supabase.from('tenants').update({
+      subscription_end_date: newEnd,
+      subscription_status: 'active',
+      is_active: true,
+      payment_requested_at: null,
+    }).eq('id', tenantId)
+    if (updErr && isNetworkOrInternalError(updErr.message)) return confirmLocal()
+    if (updErr) return c.json({ success: false, error: updErr.message }, 500)
+    return c.json({ success: true, message: '입금 확인 및 1개월 연장 완료', data: { subscription_end_date: newEnd } })
+  } catch {
+    return confirmLocal()
+  }
+})
+
+// ─────────────────────────────────────────
+// [15] 만료 고객사 자동 처리
+// GET /api/super/check-expired
+// ─────────────────────────────────────────
+superRouter.get('/check-expired', async (c) => {
+  const today = getTodayStr()
+  let processedCount = 0
+
+  // 로컬 메모리 처리
+  for (const t of localTenantStore) {
+    if (!t.is_deleted && t.subscription_end_date && t.subscription_end_date < today) {
+      if (t.is_active || t.subscription_status !== 'expired') {
+        t.is_active = false
+        t.subscription_status = 'expired'
+        processedCount++
+      }
+    }
+  }
+
+  if (!isSupabaseConfigured(c.env)) {
+    return c.json({ success: true, message: `만료 처리 완료 (로컬: ${processedCount}건)`, processed: processedCount })
+  }
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { data: expired, error } = await supabase
+      .from('tenants')
+      .select('id')
+      .lt('subscription_end_date', today)
+      .eq('is_deleted', false)
+      .neq('subscription_status', 'expired')
+    if (error && isNetworkOrInternalError(error.message)) {
+      return c.json({ success: true, message: `만료 처리 완료 (로컬: ${processedCount}건)`, processed: processedCount })
+    }
+    if (error) return c.json({ success: false, error: error.message }, 500)
+
+    const dbCount = expired?.length || 0
+    if (dbCount > 0) {
+      await supabase.from('tenants')
+        .update({ is_active: false, subscription_status: 'expired' })
+        .lt('subscription_end_date', today)
+        .eq('is_deleted', false)
+        .neq('subscription_status', 'expired')
+      processedCount += dbCount
+    }
+    return c.json({ success: true, message: `만료 처리 완료 (${processedCount}건)`, processed: processedCount })
+  } catch {
+    return c.json({ success: true, message: `만료 처리 완료 (로컬: ${processedCount}건)`, processed: processedCount })
+  }
+})
+
+// ─────────────────────────────────────────
+// [16] 결제 계좌 설정 조회
+// GET /api/super/payment-settings
+// ─────────────────────────────────────────
+superRouter.get('/payment-settings', async (c) => {
+  if (!isSupabaseConfigured(c.env)) {
+    return c.json({ success: true, data: localPaymentSettings })
+  }
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { data, error } = await supabase
+      .from('payment_settings')
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (error && isNetworkOrInternalError(error.message)) {
+      return c.json({ success: true, data: localPaymentSettings })
+    }
+    if (error) {
+      // 데이터 없을 경우 기본값 반환
+      return c.json({ success: true, data: localPaymentSettings })
+    }
+    return c.json({ success: true, data })
+  } catch {
+    return c.json({ success: true, data: localPaymentSettings })
+  }
+})
+
+// ─────────────────────────────────────────
+// [17] 결제 계좌 설정 저장
+// PUT /api/super/payment-settings
+// ─────────────────────────────────────────
+superRouter.put('/payment-settings', async (c) => {
+  let body: { bank_name?: string; account_number?: string; account_holder?: string; payment_guide?: string }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
+
+  const { bank_name, account_number, account_holder, payment_guide } = body
+
+  const saveLocal = () => {
+    if (bank_name !== undefined) localPaymentSettings.bank_name = bank_name
+    if (account_number !== undefined) localPaymentSettings.account_number = account_number
+    if (account_holder !== undefined) localPaymentSettings.account_holder = account_holder
+    if (payment_guide !== undefined) localPaymentSettings.payment_guide = payment_guide
+    localPaymentSettings.updated_at = new Date().toISOString()
+    return c.json({ success: true, message: '저장되었습니다.', data: localPaymentSettings })
+  }
+
+  if (!isSupabaseConfigured(c.env)) return saveLocal()
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (bank_name !== undefined) updateData.bank_name = bank_name
+    if (account_number !== undefined) updateData.account_number = account_number
+    if (account_holder !== undefined) updateData.account_holder = account_holder
+    if (payment_guide !== undefined) updateData.payment_guide = payment_guide
+
+    // 기존 설정 있으면 update, 없으면 insert
+    const { data: existing } = await supabase.from('payment_settings').select('id').limit(1).single()
+    let error: any
+    if (existing) {
+      const res = await supabase.from('payment_settings').update(updateData).eq('id', existing.id)
+      error = res.error
+    } else {
+      const res = await supabase.from('payment_settings').insert(updateData)
+      error = res.error
+    }
+    if (error && isNetworkOrInternalError(error.message)) return saveLocal()
+    if (error) return c.json({ success: false, error: error.message }, 500)
+    return saveLocal() // 로컬도 동기화
+  } catch {
+    return saveLocal()
   }
 })
 

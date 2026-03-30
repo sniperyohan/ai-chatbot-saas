@@ -56,6 +56,23 @@ export const superApi = {
   resetTenantPassword: (id: string) =>
     superRequest<any>('POST', `/tenants/${id}/reset-password`),
 
+  // ── 구독 관리 ─────────────────────────────────────
+  extendTenantSubscription: (id: string) =>
+    superRequest<any>('POST', `/tenants/${id}/extend`),
+  confirmTenantPayment: (id: string) =>
+    superRequest<any>('POST', `/tenants/${id}/confirm-payment`),
+  checkExpired: () =>
+    superRequest<any>('GET', '/check-expired'),
+
+  // ── 결제 설정 ─────────────────────────────────────
+  getPaymentSettings: () => superRequest<any>('GET', '/payment-settings'),
+  updatePaymentSettings: (data: {
+    bank_name?: string
+    account_number?: string
+    account_holder?: string
+    payment_guide?: string
+  }) => superRequest<any>('PUT', '/payment-settings', data),
+
   // ── 플랜 ────────────────────────────────────────
   getPlans: () => superRequest<any>('GET', '/plans'),
   updatePlan: (id: string, data: Record<string, unknown>) =>

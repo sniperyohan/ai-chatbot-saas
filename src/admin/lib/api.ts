@@ -73,4 +73,9 @@ export const api = {
     request<any>('POST', '/admin/integration/save', data),
   deleteIntegration: (platform: string) =>
     request<any>('DELETE', `/admin/integration/${platform}`),
+
+  // 구독 / 결제
+  getSubscription: () => request<any>('GET', '/admin/subscription'),
+  sendPaymentRequest: (payment_memo: string) =>
+    request<any>('POST', '/admin/payment-request', { payment_memo }),
 }
