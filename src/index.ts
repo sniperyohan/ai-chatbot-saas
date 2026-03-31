@@ -74,6 +74,7 @@ const ADMIN_HTML = `<!DOCTYPE html>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI 상담봇 관리자</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -94,6 +95,20 @@ app.get('/admin/*', (c) => {
   // 정적 에셋은 Cloudflare Pages가 서빙
   if (path.includes('/assets/')) return c.notFound()
   return c.html(ADMIN_HTML)
+})
+
+// favicon 처리
+app.get('/favicon.ico', (c) => c.redirect('/favicon.svg', 301))
+app.get('/favicon.svg', (c) => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#4F46E5"/>
+  <circle cx="12" cy="13" r="3" fill="white" opacity="0.9"/>
+  <circle cx="20" cy="13" r="3" fill="white" opacity="0.9"/>
+  <path d="M8 20 Q16 26 24 20" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>`
+  return new Response(svg, {
+    headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' }
+  })
 })
 
 // Super Admin SPA - /super/* 경로도 동일한 SPA HTML 서빙
