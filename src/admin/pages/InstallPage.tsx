@@ -108,6 +108,13 @@ const PLATFORMS = [
     desc: '워드프레스 기반 쇼핑몰',
   },
   {
+      id: 'kakao',
+    label: '카카오채널',
+    icon: '💬',
+    color: '#FAE100',
+    desc: '카카오톡 채널 연동',
+  },
+  {
     id: 'custom',
     label: '직접 설치',
     icon: '⚙️',
@@ -221,6 +228,27 @@ function getSteps(platform: string, script: string, tenantId: string) {
       {
         title: '저장 및 확인',
         desc: '저장 후 사이트 프론트에서 채팅 위젯을 확인하세요.',
+      },
+    ],
+    kakao: [
+      {
+        title: '카카오톡 채널 개설',
+        desc: '카카오톡 채널 관리자(business.kakao.com)에 접속하여 채널을 개설하세요.',
+      },
+      {
+        title: '카카오 비즈니스 관리자 설정',
+        desc: '카카오 비즈니스 관리자센터에서 [채널] → [채널 관리] → [챗봇 연결]을 클릭하세요.',
+      },
+      {
+        title: '웹사이트에 스크립트 삽입',
+        desc: '웹사이트 </body> 태그 바로 위에 아래 코드를 붙여넣으세요.',
+        code: script,
+        codeLang: 'html',
+        note: '카카오채널 연동 시 data-tenant 값이 카카오 채널 ID와 매핑됩니다. 변경하지 마세요.',
+      },
+      {
+        title: '채널 연동 확인',
+        desc: '카카오톡에서 채널을 검색하여 챗봇이 정상 응답하는지 확인하세요.',
       },
     ],
     custom: [
