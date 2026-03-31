@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 
-interface TenantInfo {
+export interface TenantInfo {
   id: string
   company_name: string
   email: string
@@ -9,6 +9,20 @@ interface TenantInfo {
   widget_color: string
   greeting_message: string
   is_temp_password: boolean
+  billing_day?: number
+  subscribed_at?: string | null
+  // 확장 필드 (GET /api/admin/me 에서 로드)
+  faq_count?: number
+  faq_limit?: number
+  faq_pct?: number
+  chat_count_today?: number
+  chat_count_month?: number
+  chat_count_total?: number
+  monthly_amount?: number
+  next_billing_date?: string
+  days_until_billing?: number
+  current_period_start?: string
+  current_period_end?: string
 }
 
 interface AuthCtx {

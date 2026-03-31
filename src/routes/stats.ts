@@ -11,6 +11,22 @@ import { Bindings, Variables } from '../types'
 const stats = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 stats.use('*', adminAuthMiddleware)
 
+function isSupabaseConfigured(env: Bindings): boolean {
+  return (
+    !!env.SUPABASE_URL &&
+    !env.SUPABASE_URL.includes('your-project') &&
+    !!env.SUPABASE_SERVICE_KEY &&
+    !env.SUPABASE_SERVICE_KEY.includes('your_supabase')
+  )
+}
+
+// 로컬 테스트 계정 stats 데이터
+const LOCAL_STATS: Record<string, any> = {
+  'local-test-basic': { today: 5, yesterday: 3, month: 87, total: 312, faq: 12 },
+  'local-test-pro':   { today: 24, yesterday: 18, month: 456, total: 2100, faq: 85 },
+  'local-test-master':{ today: 102, yesterday: 89, month: 1850, total: 18900, faq: 320 },
+}
+
 // 간단한 메모리 캐시 (1시간)
 const statsCache = new Map<string, { data: unknown; expireAt: number }>()
 
@@ -46,6 +62,36 @@ function getKSTMonthStart(): string {
 stats.get('/stats', async (c) => {
   const tenantId = c.get('tenantId')!
   const cacheKey = `stats_${tenantId}`
+
+  // 로컬 fallback: 테스트 계정이거나 Supabase 미설정
+  const localData = LOCAL_STATS[tenantId]
+  if (localData || !isSupabaseConfigured(c.env)) {
+    const d = localData || { today: 0, yesterday: 0, month: 0, total: 0, faq: 0 }
+    const growthRate = d.yesterday > 0 ? Math.round(((d.today - d.yesterday) / d.yesterday) * 100) : (d.today > 0 ? 100 : 0)
+    const now = new Date()
+    return c.json({
+      success: true,
+      data: {
+        today_count: d.today,
+        yesterday_count: d.yesterday,
+        month_count: d.month,
+        total_count: d.total,
+        faq_count: d.faq,
+        growth_rate_today: growthRate,
+        channel_stats: { web: d.today },
+        intent_stats: { FAQ_INQUIRY: Math.round(d.today * 0.6), GREETING: Math.round(d.today * 0.2), OTHER: Math.round(d.today * 0.2) },
+        recent_logs: [
+          { id: 'r1', created_at_kst: new Date(now.getTime()).toISOString().replace('T', ' ').slice(0,16), channel: 'web', user_message: '배송은 언제 되나요?', intent: 'FAQ_INQUIRY' },
+          { id: 'r2', created_at_kst: new Date(now.getTime()-60000).toISOString().replace('T', ' ').slice(0,16), channel: 'web', user_message: '반품 방법을 알려주세요.', intent: 'FAQ_INQUIRY' },
+          { id: 'r3', created_at_kst: new Date(now.getTime()-120000).toISOString().replace('T', ' ').slice(0,16), channel: 'web', user_message: '안녕하세요!', intent: 'GREETING' },
+          { id: 'r4', created_at_kst: new Date(now.getTime()-300000).toISOString().replace('T', ' ').slice(0,16), channel: 'web', user_message: '결제 오류가 발생했어요.', intent: 'COMPLAINT' },
+          { id: 'r5', created_at_kst: new Date(now.getTime()-600000).toISOString().replace('T', ' ').slice(0,16), channel: 'web', user_message: '교환 신청하고 싶어요.', intent: 'FAQ_INQUIRY' },
+        ],
+        generated_at: now.toISOString(),
+      },
+      cached: false,
+    })
+  }
 
   const cached = getCache(cacheKey)
   if (cached) {
@@ -146,6 +192,15 @@ stats.get('/stats', async (c) => {
 // ─────────────────────────────────────────
 stats.get('/logs', async (c) => {
   const tenantId = c.get('tenantId')!
+
+  // 로컬 fallback
+  if (!isSupabaseConfigured(c.env) || LOCAL_STATS[tenantId]) {
+    return c.json({
+      success: true,
+      data: { items: [], total: 0, page: 1, limit: 20, totalPages: 0 },
+    })
+  }
+
   const supabase = createSupabaseAdmin(c.env)
 
   const page = parseInt(c.req.query('page') || '1')

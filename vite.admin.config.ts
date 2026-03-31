@@ -16,6 +16,8 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
+entryFileNames: `assets/[name]-[hash]-v2.js`,
+chunkFileNames: `assets/[name]-[hash]-v2.js`,
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'recharts-vendor': ['recharts'],

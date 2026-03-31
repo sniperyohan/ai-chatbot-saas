@@ -1,301 +1,387 @@
-import React, { useState, useEffect } from 'react'
-import { Copy, Check, ExternalLink, Key, TestTube, Save, Trash2, Loader2, CheckCircle, XCircle, Link2 } from 'lucide-react'
-import { api } from '../lib/api'
+import React, { useState } from 'react'
+import { Copy, Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { useToast } from '../hooks/useToast'
-import ToastContainer from '../components/Toast'
-import Modal from '../components/Modal'
 import { S } from '../lib/ui'
 
-const PLATFORMS = [
-  { name: 'cafe24', label: '카페24', icon: '🛒', color: '#FF6B35', authType: 'oauth2', desc: '카페24 쇼핑몰 주문조회 연동' },
-  { name: 'smartstore', label: '스마트스토어', icon: '🟢', color: '#03C75A', authType: 'oauth2', desc: '네이버 스마트스토어 주문조회 연동' },
-  { name: 'imweb', label: '아임웹', icon: '🌐', color: '#5B67CA', authType: 'api_key', desc: '아임웹 쇼핑몰 주문조회 연동' },
-  { name: 'woocommerce', label: 'WooCommerce', icon: '🎯', color: '#7F54B3', authType: 'api_key', desc: '워드프레스 우커머스 주문조회 연동' },
-  { name: 'custom', label: '커스텀 API', icon: '⚙️', color: '#6B7280', authType: 'api_key', desc: '직접 개발한 쇼핑몰 API 연동' },
-]
-
-function CopyButton({ text, label = '복사' }: { text: string; label?: string }) {
+// 복사 버튼 컴포넌트
+function CopyButton({ text, label = '복사', size = 'sm' }: { text: string; label?: string; size?: 'sm' | 'md' }) {
   const [copied, setCopied] = useState(false)
   const copy = () => {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
   }
+  const pad = size === 'md' ? '9px 18px' : '6px 14px'
+  const fs = size === 'md' ? '13px' : '12px'
   return (
     <button onClick={copy} style={{
-      display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
+      display: 'inline-flex', alignItems: 'center', gap: '6px', padding: pad,
       background: copied ? '#059669' : 'var(--primary)', color: '#fff',
-      border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', minHeight: '38px', fontFamily: 'inherit',
-      transition: 'background 0.2s',
+      border: 'none', borderRadius: '8px', fontSize: fs, fontWeight: 600,
+      cursor: 'pointer', minHeight: '36px', fontFamily: 'inherit', transition: 'background 0.2s',
+      whiteSpace: 'nowrap',
     }}>
-      {copied ? <><Check size={14}/>복사됨!</> : <><Copy size={14}/>{label}</>}
+      {copied ? <><Check size={13}/>복사됨!</> : <><Copy size={13}/>{label}</>}
     </button>
   )
 }
 
+// 코드 박스
+function CodeBox({ code, lang = 'html' }: { code: string; lang?: string }) {
+  return (
+    <div style={{ position: 'relative', background: '#1E1E2E', borderRadius: '10px', padding: '20px', marginBottom: '10px', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: '10px', right: '10px' }}>
+        <CopyButton text={code} label="복사"/>
+      </div>
+      <pre style={{ fontSize: '12px', color: '#CDD6F4', overflowX: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', lineHeight: 1.6, paddingRight: '80px' }}>
+        {code}
+      </pre>
+      <div style={{ position: 'absolute', top: '10px', left: '14px', fontSize: '10px', color: 'rgba(205,214,244,0.4)', fontWeight: 600 }}>
+        {lang.toUpperCase()}
+      </div>
+    </div>
+  )
+}
+
+// 단계별 설치 가이드 아이템
+function StepItem({ num, title, desc, code, codeLang, note }: { num: number; title: string; desc: string; code?: string; codeLang?: string; note?: string }) {
+  const [expanded, setExpanded] = useState(num === 1)
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: '10px', marginBottom: '10px', overflow: 'hidden' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', background: expanded ? 'rgba(79,70,229,0.03)' : 'var(--bg-secondary)', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}
+      >
+        <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: expanded ? 'var(--primary)' : 'var(--border)', color: expanded ? '#fff' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 700, flexShrink: 0 }}>
+          {num}
+        </div>
+        <span style={{ flex: 1, fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{title}</span>
+        {expanded ? <ChevronDown size={16} color="var(--text-secondary)"/> : <ChevronRight size={16} color="var(--text-secondary)"/>}
+      </button>
+      {expanded && (
+        <div style={{ padding: '0 16px 16px 56px' }}>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: code ? '12px' : 0, lineHeight: 1.7 }}>{desc}</p>
+          {code && <CodeBox code={code} lang={codeLang}/>}
+          {note && <p style={{ fontSize: '12px', color: 'var(--primary)', background: 'rgba(79,70,229,0.06)', padding: '8px 12px', borderRadius: '6px', marginTop: '8px', lineHeight: 1.6 }}>💡 {note}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 플랫폼 탭
+const PLATFORMS = [
+  {
+    id: 'cafe24',
+    label: '카페24',
+    icon: '🛒',
+    color: '#FF6B35',
+    desc: '국내 최대 쇼핑몰 플랫폼',
+  },
+  {
+    id: 'smartstore',
+    label: '스마트스토어',
+    icon: '🟢',
+    color: '#03C75A',
+    desc: '네이버 스마트스토어',
+  },
+  {
+    id: 'imweb',
+    label: '아임웹',
+    icon: '🌐',
+    color: '#5B67CA',
+    desc: '홈페이지/쇼핑몰 빌더',
+  },
+  {
+    id: 'godomall',
+    label: '고도몰',
+    icon: '🏪',
+    color: '#FF4444',
+    desc: '고도소프트 쇼핑몰',
+  },
+  {
+    id: 'woocommerce',
+    label: 'WooCommerce',
+    icon: '🎯',
+    color: '#7F54B3',
+    desc: '워드프레스 기반 쇼핑몰',
+  },
+  {
+    id: 'custom',
+    label: '직접 설치',
+    icon: '⚙️',
+    color: '#6B7280',
+    desc: 'HTML 직접 삽입',
+  },
+]
+
+function getSteps(platform: string, script: string, tenantId: string) {
+  const steps: Record<string, any[]> = {
+    cafe24: [
+      {
+        title: '카페24 관리자 접속',
+        desc: '카페24 관리자 페이지(admin.cafe24.com)에 로그인하세요.',
+      },
+      {
+        title: '디자인 편집 진입',
+        desc: '좌측 메뉴에서 [디자인] → [디자인 편집] → [HTML 편집]을 클릭하세요.',
+      },
+      {
+        title: '레이아웃 파일에서 코드 삽입',
+        desc: '기본 레이아웃의 HTML에서 </body> 태그를 찾아 그 바로 앞에 아래 코드를 붙여넣으세요.',
+        code: script,
+        codeLang: 'html',
+        note: '다자인 편집에서 상단 메뉴 [공통 레이아웃(하단)]을 선택하면 더 편리합니다.',
+      },
+      {
+        title: '저장 후 확인',
+        desc: '저장 버튼을 클릭하고, 쇼핑몰 프론트에서 채팅 위젯이 정상 표시되는지 확인하세요.',
+      },
+    ],
+    smartstore: [
+      {
+        title: '스마트스토어 관리자 접속',
+        desc: '스마트스토어 센터(sell.smartstore.naver.com)에 로그인하세요.',
+      },
+      {
+        title: '스토어 전시 관리 접속',
+        desc: '좌측 메뉴에서 [스토어 전시] → [스토어 꾸미기] → [컴포넌트 관리]를 클릭하세요.',
+      },
+      {
+        title: 'HTML 위젯 추가',
+        desc: '컴포넌트 추가에서 [HTML/CSS] 유형을 선택하고 아래 코드를 붙여넣으세요.',
+        code: script,
+        codeLang: 'html',
+        note: '스마트스토어는 외부 스크립트 사용에 제한이 있을 수 있습니다. "직접 설치" 방법도 참고해 주세요.',
+      },
+      {
+        title: '저장 후 미리보기',
+        desc: '저장 후 스토어 화면에서 채팅 위젯을 확인하세요.',
+      },
+    ],
+    imweb: [
+      {
+        title: '아임웹 편집 화면 접속',
+        desc: '아임웹 관리자(imweb.me)에 로그인 후 내 사이트 → 편집하기를 클릭하세요.',
+      },
+      {
+        title: '코드 삽입 설정으로 이동',
+        desc: '[설정] → [코드 삽입] 메뉴로 이동하세요. 또는 [사이트 설정] → [분석/마케팅 코드 삽입]을 찾으세요.',
+      },
+      {
+        title: 'BODY 종료 전 코드 삽입',
+        desc: '"BODY 종료 전" 입력란에 아래 코드를 붙여넣으세요.',
+        code: script,
+        codeLang: 'html',
+        note: '아임웹 버전에 따라 경로가 다를 수 있습니다. "외부 스크립트" 항목도 확인해 보세요.',
+      },
+      {
+        title: '저장 및 배포',
+        desc: '저장 후 [배포하기] 버튼을 눌러 변경사항을 사이트에 반영하세요.',
+      },
+    ],
+    godomall: [
+      {
+        title: '고도몰 관리자 접속',
+        desc: '고도몰 관리자 페이지에 로그인하세요.',
+      },
+      {
+        title: '디자인 편집 진입',
+        desc: '[디자인] → [PC 쇼핑몰 디자인] → [HTML 편집]으로 이동하세요.',
+      },
+      {
+        title: 'footer.html에 코드 삽입',
+        desc: 'layouts 폴더의 footer.html 파일을 열고 </body> 태그 앞에 아래 코드를 삽입하세요.',
+        code: script,
+        codeLang: 'html',
+        note: '고도몰 5 이상에서는 [통합 레이아웃] 파일 편집을 사용하세요.',
+      },
+      {
+        title: '저장 후 확인',
+        desc: '저장 후 쇼핑몰에서 위젯이 표시되는지 확인하세요.',
+      },
+    ],
+    woocommerce: [
+      {
+        title: '워드프레스 관리자 접속',
+        desc: '워드프레스 관리자(/wp-admin)에 로그인하세요.',
+      },
+      {
+        title: '테마 편집 또는 플러그인 사용',
+        desc: '[외관] → [테마 편집] → footer.php 파일을 선택하세요. 또는 "Insert Headers and Footers" 플러그인을 사용하세요.',
+      },
+      {
+        title: 'footer.php에 코드 삽입',
+        desc: '</body> 태그 직전에 아래 코드를 붙여넣으세요.',
+        code: script,
+        codeLang: 'html',
+        note: '"Insert Headers and Footers" 플러그인 사용 시 [설정] → [Insert Headers and Footers] → Footer 섹션에 붙여넣으세요.',
+      },
+      {
+        title: '저장 및 확인',
+        desc: '저장 후 사이트 프론트에서 채팅 위젯을 확인하세요.',
+      },
+    ],
+    custom: [
+      {
+        title: 'HTML 파일 준비',
+        desc: '위젯을 설치할 HTML 파일을 텍스트 에디터(VS Code, 메모장 등)로 여세요.',
+      },
+      {
+        title: '</body> 태그 위치 확인',
+        desc: 'HTML 파일에서 </body> 태그를 찾으세요. 보통 파일 가장 하단에 있습니다.',
+      },
+      {
+        title: '스크립트 삽입',
+        desc: '</body> 태그 바로 위에 아래 코드를 붙여넣으세요.',
+        code: script,
+        codeLang: 'html',
+        note: `data-tenant="${tenantId}" 값이 귀사 고유 ID입니다. 절대 변경하지 마세요.`,
+      },
+      {
+        title: '파일 저장 후 업로드',
+        desc: '수정한 파일을 저장하고 서버에 업로드하세요. 브라우저에서 채팅 아이콘이 표시되면 설치 완료입니다.',
+      },
+    ],
+  }
+  return steps[platform] || steps.custom
+}
+
 export default function InstallPage() {
   const { tenant } = useAuth()
-  const toast = useToast()
-  const [integrations, setIntegrations] = useState<Record<string, any>>({})
-  const [modalPlatform, setModalPlatform] = useState<string | null>(null)
-  const [apiKey, setApiKey] = useState('')
-  const [apiSecret, setApiSecret] = useState('')
-  const [shopId, setShopId] = useState('')
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<'success'|'fail'|null>(null)
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState<string|null>(null)
+  const [activePlatform, setActivePlatform] = useState('cafe24')
 
   const tenantId = tenant?.id || 'YOUR_TENANT_ID'
-  const widgetScript = `<script src="https://your-domain.pages.dev/widget.js" data-tenant="${tenantId}" defer></script>`
-  const kakaoUrl = `https://your-domain.pages.dev/api/kakao/chat`
-  const naverUrl = `https://your-domain.pages.dev/api/naver/chat`
-  const orderApiUrl = `https://your-domain.pages.dev/api/order/lookup`
+  const domain = 'https://ai-chatbot-saas-1cb.pages.dev'
+  const widgetScript = `<script\n  src="${domain}/widget.js"\n  data-tenant="${tenantId}"\n  defer\n></script>`
 
-  const isPro = tenant?.plan === 'pro' || tenant?.plan === 'master'
-
-  useEffect(() => {
-    api.getIntegrations().then(res => {
-      const data: Record<string, any> = {}
-      for (const i of res.data?.items || []) data[i.platform_name] = i
-      setIntegrations(data)
-    }).catch(() => {})
-  }, [])
-
-  const openModal = (platform: string) => {
-    const existing = integrations[platform]
-    setApiKey(existing?.api_key || '')
-    setApiSecret(existing?.api_secret || '')
-    setShopId(existing?.shop_id || '')
-    setTestResult(null)
-    setModalPlatform(platform)
-  }
-
-  const handleTest = async () => {
-    setTesting(true); setTestResult(null)
-    try {
-      await api.testIntegration({ platform_name: modalPlatform, api_key: apiKey, api_secret: apiSecret, shop_id: shopId })
-      setTestResult('success')
-    } catch {
-      setTestResult('fail')
-    } finally {
-      setTesting(false)
-    }
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      await api.saveIntegration({ platform_name: modalPlatform, api_key: apiKey, api_secret: apiSecret, shop_id: shopId })
-      const res = await api.getIntegrations()
-      const data: Record<string, any> = {}
-      for (const i of res.data?.items || []) data[i.platform_name] = i
-      setIntegrations(data)
-      toast.success(`${PLATFORMS.find(p=>p.name===modalPlatform)?.label} 연동이 저장되었습니다!`)
-      setModalPlatform(null)
-    } catch (e: any) {
-      toast.error(e.message || '저장 실패')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleDelete = async (platform: string) => {
-    setDeleting(platform)
-    try {
-      await api.deleteIntegration(platform)
-      setIntegrations(prev => { const n = {...prev}; delete n[platform]; return n })
-      toast.success('연동이 해제되었습니다.')
-    } catch (e: any) {
-      toast.error(e.message || '삭제 실패')
-    } finally {
-      setDeleting(null)
-    }
-  }
-
-  const modalPlatformInfo = PLATFORMS.find(p => p.name === modalPlatform)
+  const currentPlatform = PLATFORMS.find(p => p.id === activePlatform)!
+  const steps = getSteps(activePlatform, widgetScript, tenantId)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <ToastContainer toasts={toast.toasts} onRemove={toast.removeToast}/>
-      <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>설치 코드</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>위젯 설치 가이드</h2>
+        <span style={{ fontSize: '12px', fontWeight: 600, padding: '3px 10px', borderRadius: '9999px', background: 'rgba(79,70,229,0.1)', color: 'var(--primary)' }}>
+          Tenant ID: {tenantId.slice(0, 16)}{tenantId.length > 16 ? '...' : ''}
+        </span>
+      </div>
 
-      {/* Web Widget */}
-      <div style={S.card}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-          <span style={{ fontSize: '20px' }}>🌐</span>
-          <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>웹 위젯 설치</h3>
+      {/* 위젯 스크립트 코드 */}
+      <div style={{ ...S.card }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+          <span style={{ fontSize: '18px' }}>📋</span>
+          <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>설치 코드 (공통)</h3>
         </div>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>아래 코드를 웹사이트 {'<body>'} 태그 안에 붙여넣으세요.</p>
-        <div style={{ position: 'relative', background: '#1E1E2E', borderRadius: '10px', padding: '20px', marginBottom: '12px' }}>
-          <pre style={{ fontSize: '13px', color: '#CDD6F4', overflowX: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{widgetScript}</pre>
-        </div>
-        <CopyButton text={widgetScript} label="코드 복사"/>
-
-        {/* Platform Guides */}
-        <div style={{ marginTop: '20px', padding: '16px', background: 'var(--bg-primary)', borderRadius: '10px' }}>
-          <p style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '12px' }}>📋 플랫폼별 설치 가이드</p>
-          {[
-            { name: 'Cafe24', step: '쇼핑몰 관리 → 디자인 → HTML/CSS 편집 → body 태그 전에 삽입' },
-            { name: 'Shopify', step: '온라인 스토어 → 테마 → 코드 편집 → theme.liquid → </body> 앞에 삽입' },
-            { name: '워드프레스', step: '외관 → 테마 편집 → footer.php → </body> 앞에 삽입' },
-          ].map(({ name, step }) => (
-            <div key={name} style={{ display: 'flex', gap: '12px', marginBottom: '8px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--primary)', minWidth: '80px' }}>{name}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{step}</span>
-            </div>
-          ))}
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.6 }}>
+          아래 코드를 웹사이트의 <code style={{ background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', color: 'var(--primary)', fontFamily: 'monospace' }}>&lt;/body&gt;</code> 태그 앞에 붙여넣으세요. 귀사의 Tenant ID가 자동으로 포함되어 있습니다.
+        </p>
+        <CodeBox code={widgetScript} lang="html"/>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginTop: '4px' }}>
+          <CopyButton text={widgetScript} label="전체 코드 복사" size="md"/>
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+            Tenant ID: <code style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--primary)' }}>{tenantId}</code>
+          </span>
         </div>
       </div>
 
-      {/* KakaoTalk */}
-      <div style={S.card}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-          <span style={{ fontSize: '20px' }}>💬</span>
-          <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>카카오톡 채널 연동</h3>
-        </div>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>카카오 비즈니스 → 카카오톡 채널 → 챗봇 → 스킬 서버 URL에 입력하세요.</p>
-        <div style={{ background: 'var(--bg-primary)', borderRadius: '8px', padding: '12px 16px', fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-primary)', marginBottom: '12px', wordBreak: 'break-all' }}>
-          {kakaoUrl}
-        </div>
-        <CopyButton text={kakaoUrl} label="URL 복사"/>
-      </div>
+      {/* 플랫폼 선택 탭 */}
+      <div style={{ ...S.card }}>
+        <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '16px' }}>
+          📦 플랫폼별 설치 가이드
+        </h3>
 
-      {/* Naver TalkTalk */}
-      <div style={S.card}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-          <span style={{ fontSize: '20px' }}>🟢</span>
-          <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>네이버 톡톡 연동</h3>
-        </div>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>네이버 톡톡 파트너센터 → 챗봇 설정 → 웹훅 URL에 입력하세요.</p>
-        <div style={{ background: 'var(--bg-primary)', borderRadius: '8px', padding: '12px 16px', fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-primary)', marginBottom: '12px', wordBreak: 'break-all' }}>
-          {naverUrl}
-        </div>
-        <CopyButton text={naverUrl} label="URL 복사"/>
-      </div>
-
-      {/* Order Lookup - Pro+ Only */}
-      <div style={{ ...S.card, opacity: isPro ? 1 : 0.7, position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '20px' }}>🔗</span>
-            <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>주문조회 API 연동</h3>
-          </div>
-          <span style={{ padding: '3px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 700, background: 'rgba(79,70,229,0.1)', color: 'var(--primary)' }}>Pro+ 전용</span>
-        </div>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>쇼핑몰 플랫폼과 연동하여 고객이 주문 현황을 조회할 수 있습니다.</p>
-
-        {!isPro && (
-          <div style={{ padding: '16px', background: 'rgba(79,70,229,0.05)', border: '1px solid rgba(79,70,229,0.15)', borderRadius: '10px', textAlign: 'center', marginBottom: '20px' }}>
-            <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--primary)', marginBottom: '4px' }}>🚀 Pro 플랜으로 업그레이드하세요</p>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>주문조회 연동은 Pro 플랜 이상에서만 사용 가능합니다.</p>
-          </div>
-        )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
-          {PLATFORMS.map(({ name, label, icon, color, desc }) => {
-            const integrated = !!integrations[name]
+        {/* 플랫폼 탭 버튼들 */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '20px' }}>
+          {PLATFORMS.map(p => {
+            const isActive = activePlatform === p.id
             return (
-              <div key={name} style={{ border: `2px solid ${integrated ? color : 'var(--border)'}`, borderRadius: '12px', padding: '16px', background: integrated ? `${color}08` : 'var(--bg-secondary)', transition: 'all 0.2s' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '22px' }}>{icon}</span>
-                  <div>
-                    <p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{label}</p>
-                    {integrated && <p style={{ fontSize: '11px', color: color, fontWeight: 600 }}>✓ 연동됨</p>}
-                  </div>
-                </div>
-                <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.5 }}>{desc}</p>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <button onClick={() => isPro && openModal(name)} disabled={!isPro}
-                    style={{ flex: 1, padding: '7px 10px', borderRadius: '7px', fontSize: '12px', fontWeight: 600, cursor: isPro ? 'pointer' : 'not-allowed', border: 'none', background: integrated ? color : 'var(--primary)', color: '#fff', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', minHeight: '36px' }}>
-                    <Key size={12}/>{integrated ? '수정' : '연동'}
-                  </button>
-                  {integrated && (
-                    <button onClick={() => isPro && handleDelete(name)} disabled={deleting === name || !isPro}
-                      style={{ padding: '7px', borderRadius: '7px', background: 'rgba(239,68,68,0.1)', border: 'none', cursor: 'pointer', color: '#DC2626', display: 'flex', alignItems: 'center', minHeight: '36px' }}>
-                      {deleting === name ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }}/> : <Trash2 size={12}/>}
-                    </button>
-                  )}
-                </div>
-              </div>
+              <button
+                key={p.id}
+                onClick={() => setActivePlatform(p.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '8px 14px', borderRadius: '10px', cursor: 'pointer',
+                  fontSize: '13px', fontWeight: 600, fontFamily: 'inherit',
+                  border: isActive ? `2px solid ${p.color}` : '2px solid var(--border)',
+                  background: isActive ? `${p.color}12` : 'var(--bg-secondary)',
+                  color: isActive ? p.color : 'var(--text-secondary)',
+                  transition: 'all 0.15s',
+                  minHeight: '40px',
+                }}
+              >
+                <span style={{ fontSize: '16px' }}>{p.icon}</span>
+                {p.label}
+              </button>
             )
           })}
         </div>
 
-        {isPro && (
-          <div style={{ marginTop: '20px', padding: '14px 16px', background: 'var(--bg-primary)', borderRadius: '10px' }}>
-            <p style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>주문조회 API 엔드포인트</p>
-            <div style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-secondary)', wordBreak: 'break-all', marginBottom: '10px' }}>{orderApiUrl}</div>
-            <CopyButton text={orderApiUrl} label="API URL 복사"/>
+        {/* 선택된 플랫폼 정보 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', background: `${currentPlatform.color}08`, border: `1px solid ${currentPlatform.color}25`, borderRadius: '10px', marginBottom: '20px' }}>
+          <span style={{ fontSize: '28px' }}>{currentPlatform.icon}</span>
+          <div>
+            <p style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{currentPlatform.label}</p>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{currentPlatform.desc}</p>
           </div>
-        )}
+          <div style={{ marginLeft: 'auto', padding: '4px 12px', borderRadius: '9999px', background: `${currentPlatform.color}15`, color: currentPlatform.color, fontSize: '12px', fontWeight: 700 }}>
+            {steps.length}단계
+          </div>
+        </div>
+
+        {/* 단계별 가이드 */}
+        <div>
+          {steps.map((step: any, i: number) => (
+            <StepItem
+              key={i}
+              num={i + 1}
+              title={step.title}
+              desc={step.desc}
+              code={step.code}
+              codeLang={step.codeLang}
+              note={step.note}
+            />
+          ))}
+        </div>
+
+        {/* 설치 완료 체크 */}
+        <div style={{ marginTop: '20px', padding: '14px 16px', background: 'rgba(5,150,105,0.05)', border: '1px solid rgba(5,150,105,0.2)', borderRadius: '10px' }}>
+          <p style={{ fontSize: '13px', fontWeight: 700, color: '#059669', marginBottom: '6px' }}>✅ 설치 완료 확인</p>
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            설치 후 쇼핑몰 화면 오른쪽 하단에 채팅 버튼이 나타나면 설치 완료입니다.<br/>
+            버튼이 보이지 않으면 브라우저 캐시를 지우거나 (Ctrl+Shift+R) 다시 시도해 보세요.
+          </p>
+        </div>
       </div>
 
-      {/* Integration Modal */}
-      <Modal open={!!modalPlatform} onClose={() => setModalPlatform(null)} title={`${modalPlatformInfo?.label || ''} 연동 설정`} size="md">
-        {modalPlatformInfo && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', background: 'var(--bg-primary)', borderRadius: '10px' }}>
-              <span style={{ fontSize: '24px' }}>{modalPlatformInfo.icon}</span>
-              <div>
-                <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{modalPlatformInfo.label}</p>
-                <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{modalPlatformInfo.desc}</p>
-              </div>
-            </div>
+      {/* 고급 설정 */}
+      <div style={{ ...S.card }}>
+        <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px' }}>⚙️ 고급 설정 (선택사항)</h3>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px', lineHeight: 1.6 }}>
+          위젯의 위치, 색상, 자동 오픈 기능을 커스터마이징할 수 있습니다.
+        </p>
+        <CodeBox
+          code={`<script
+  src="${domain}/widget.js"
+  data-tenant="${tenantId}"
+  data-position="bottom-right"   <!-- bottom-right | bottom-left -->
+  data-auto-open="false"         <!-- 자동 오픈 여부 -->
+  data-delay="3000"              <!-- 자동 오픈 지연 (ms) -->
+  defer
+></script>`}
+          lang="html"
+        />
+      </div>
 
-            {(modalPlatformInfo.authType === 'api_key' || modalPlatform === 'custom') && (
-              <div>
-                <label style={S.label}>API 키</label>
-                <input value={apiKey} onChange={e => setApiKey(e.target.value)} type="password"
-                  style={S.input} placeholder="API 키를 입력하세요"/>
-              </div>
-            )}
-
-            {modalPlatformInfo.authType === 'oauth2' && (
-              <>
-                <div>
-                  <label style={S.label}>Client ID</label>
-                  <input value={apiKey} onChange={e => setApiKey(e.target.value)}
-                    style={S.input} placeholder="Client ID"/>
-                </div>
-                <div>
-                  <label style={S.label}>Client Secret</label>
-                  <input value={apiSecret} onChange={e => setApiSecret(e.target.value)} type="password"
-                    style={S.input} placeholder="Client Secret"/>
-                </div>
-              </>
-            )}
-
-            {(modalPlatform === 'cafe24' || modalPlatform === 'woocommerce') && (
-              <div>
-                <label style={S.label}>{modalPlatform === 'cafe24' ? '몰 ID (Mall ID)' : '쇼핑몰 URL'}</label>
-                <input value={shopId} onChange={e => setShopId(e.target.value)}
-                  style={S.input} placeholder={modalPlatform === 'cafe24' ? 'mymall' : 'https://myshop.com'}/>
-              </div>
-            )}
-
-            {/* Test Result */}
-            {testResult && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderRadius: '8px', background: testResult === 'success' ? '#ECFDF5' : '#FEF2F2', border: `1px solid ${testResult === 'success' ? '#6EE7B7' : '#FECACA'}`, color: testResult === 'success' ? '#065F46' : '#991B1B' }}>
-                {testResult === 'success' ? <CheckCircle size={18}/> : <XCircle size={18}/>}
-                <p style={{ fontSize: '13px', fontWeight: 600 }}>{testResult === 'success' ? '✅ 연동 테스트 성공!' : '❌ 연동 테스트 실패. 키를 확인해주세요.'}</p>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button onClick={handleTest} disabled={testing || !apiKey}
-                style={{ ...S.btnSecondary, flex: 1, opacity: testing || !apiKey ? 0.5 : 1 }}>
-                {testing ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }}/>테스트 중...</> : <><TestTube size={14}/>연동 테스트</>}
-              </button>
-              <button onClick={handleSave} disabled={saving || !apiKey}
-                style={{ ...S.btnPrimary, flex: 1, opacity: saving || !apiKey ? 0.5 : 1 }}>
-                {saving ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }}/>저장 중...</> : <><Save size={14}/>저장</>}
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {/* 문의 */}
+      <div style={{ ...S.card, textAlign: 'center', padding: '24px' }}>
+        <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>설치가 어려우신가요?</p>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          대시보드의 입금했어요 버튼을 통해 설치 지원을 요청하시거나,<br/>
+          담당자에게 직접 문의해 주시면 도움을 드리겠습니다.
+        </p>
+      </div>
     </div>
   )
 }

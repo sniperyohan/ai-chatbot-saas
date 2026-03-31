@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Upload, Sparkles, Save, Trash2, Pencil, X, Check, Loader2, AlertTriangle, BookOpen } from 'lucide-react'
+import { Upload, Sparkles, Save, Trash2, Pencil, X, Check, Loader2, AlertTriangle, BookOpen, Search, ToggleLeft, ToggleRight } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../hooks/useToast'
@@ -40,27 +40,39 @@ export default function FAQPage() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [filterCat, setFilterCat] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [loadingList, setLoadingList] = useState(true)
   const [editId, setEditId] = useState<string|null>(null)
   const [editData, setEditData] = useState<{question:string;answer:string}>({question:'',answer:''})
   const [deleteConfirm, setDeleteConfirm] = useState<string|null>(null)
+  const [togglingId, setTogglingId] = useState<string|null>(null)
 
   const limit = PLAN_LIMIT[tenant?.plan || 'basic'] || 50
   const pct = limit === -1 ? 0 : Math.round((total / limit) * 100)
+  const barColor = pct >= 100 ? '#EF4444' : pct >= 80 ? '#F59E0B' : '#4F46E5'
 
   const fetchDocs = useCallback(async () => {
     setLoadingList(true)
     try {
       const params: any = { page, limit: 20 }
       if (filterCat) params.category = filterCat
+      if (searchQuery.trim()) params.search = searchQuery.trim()
       const res = await api.getDocuments(params)
       setDocs(res.data?.items || [])
       setTotal(res.data?.total || 0)
     } catch {}
     setLoadingList(false)
-  }, [page, filterCat])
+  }, [page, filterCat, searchQuery])
 
   useEffect(() => { fetchDocs() }, [fetchDocs])
+
+  // 검색 디바운스
+  const searchTimeout = useRef<any>(null)
+  const handleSearch = (v: string) => {
+    setSearchQuery(v)
+    clearTimeout(searchTimeout.current)
+    searchTimeout.current = setTimeout(() => { setPage(1) }, 400)
+  }
 
   const handleSave = async () => {
     if (question.trim().length < 2) { toast.error('질문은 2자 이상 입력하세요.'); return }
@@ -159,6 +171,20 @@ export default function FAQPage() {
     setDeleteConfirm(null)
   }
 
+  // 활성/비활성 토글
+  const handleToggle = async (doc: any) => {
+    setTogglingId(doc.id)
+    try {
+      await api.toggleDocument(doc.id, !doc.is_active)
+      setDocs(prev => prev.map(d => d.id === doc.id ? { ...d, is_active: !d.is_active } : d))
+      toast.success(doc.is_active ? 'FAQ가 비활성화되었습니다.' : 'FAQ가 활성화되었습니다.')
+    } catch (e: any) {
+      toast.error(e.message || '변경 실패')
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
   const startEdit = (doc: any) => {
     setEditId(doc.id)
     setEditData({ question: doc.refined_question || doc.original_question || '', answer: doc.refined_answer || doc.original_answer || '' })
@@ -187,8 +213,8 @@ export default function FAQPage() {
           <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>FAQ 관리</h2>
           <span style={{
             fontSize: '13px', fontWeight: 600, padding: '4px 12px', borderRadius: '9999px',
-            background: pct >= 100 ? 'rgba(239,68,68,0.1)' : pct >= 90 ? 'rgba(245,158,11,0.1)' : 'rgba(79,70,229,0.1)',
-            color: pct >= 100 ? '#DC2626' : pct >= 90 ? '#D97706' : 'var(--primary)',
+            background: pct >= 100 ? 'rgba(239,68,68,0.1)' : pct >= 80 ? 'rgba(245,158,11,0.1)' : 'rgba(79,70,229,0.1)',
+            color: pct >= 100 ? '#DC2626' : pct >= 80 ? '#D97706' : 'var(--primary)',
           }}>
             {limit === -1 ? `${total}개 (무제한)` : `${total} / ${limit}개`}
           </span>
@@ -205,6 +231,31 @@ export default function FAQPage() {
           <Sparkles size={16} color={aiToggle ? 'var(--primary)' : 'var(--text-secondary)'}/>
         </div>
       </div>
+
+      {/* 플랜 한도 프로그레스 바 */}
+      {limit !== -1 && (
+        <div style={{ ...S.card, padding: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>플랜 한도 사용량</span>
+            <span style={{ fontSize: '12px', fontWeight: 700, color: barColor }}>{pct}% ({total}/{limit}개)</span>
+          </div>
+          <div style={{ height: '10px', background: 'var(--bg-primary)', borderRadius: '5px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: barColor, borderRadius: '5px', transition: 'width 0.5s ease' }}/>
+          </div>
+          {pct >= 100 && (
+            <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '8px' }}>
+              <AlertTriangle size={15} color="#DC2626"/>
+              <p style={{ fontSize: '13px', color: '#991B1B', fontWeight: 600 }}>FAQ 한도 초과! 플랜을 업그레이드해야 새 FAQ를 추가할 수 있습니다.</p>
+            </div>
+          )}
+          {pct >= 80 && pct < 100 && (
+            <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: '#FEFCE8', border: '1px solid #FEF08A', borderRadius: '8px' }}>
+              <AlertTriangle size={15} color="#D97706"/>
+              <p style={{ fontSize: '13px', color: '#854D0E', fontWeight: 600 }}>한도의 80% 이상 사용했습니다. 곧 업그레이드가 필요할 수 있습니다.</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* FAQ 입력 폼 */}
       <div style={{ ...S.card, display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -286,7 +337,24 @@ export default function FAQPage() {
       {/* FAQ 목록 */}
       <div style={S.card}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>FAQ 목록</h3>
+          <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>FAQ 목록</h3>
+          {/* 검색 박스 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '200px', position: 'relative' }}>
+            <Search size={15} color="var(--text-secondary)" style={{ position: 'absolute', left: '12px', pointerEvents: 'none' }}/>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => handleSearch(e.target.value)}
+              placeholder="질문 또는 답변 검색..."
+              style={{ ...S.input, paddingLeft: '36px', flex: 1, minHeight: '38px', fontSize: '13px' }}
+            />
+            {searchQuery && (
+              <button onClick={() => { setSearchQuery(''); setPage(1) }} style={{ position: 'absolute', right: '10px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '4px', display: 'flex', alignItems: 'center' }}>
+                <X size={14}/>
+              </button>
+            )}
+          </div>
+          {/* 카테고리 필터 */}
           <select value={filterCat} onChange={e => { setFilterCat(e.target.value); setPage(1) }}
             style={{ ...S.select, minWidth: '120px', width: 'auto', minHeight: '38px' }}>
             <option value="">전체 카테고리</option>
@@ -295,25 +363,29 @@ export default function FAQPage() {
         </div>
 
         {loadingList ? <SkeletonTable/> : docs.length === 0 ? (
-          <EmptyState title="등록된 FAQ가 없습니다" description="위 폼에서 첫 FAQ를 등록해보세요." icon={<BookOpen size={24} color="var(--text-secondary)"/>}/>
+          <EmptyState
+            title={searchQuery ? `"${searchQuery}" 검색 결과 없음` : '등록된 FAQ가 없습니다'}
+            description={searchQuery ? '다른 키워드로 검색해보세요.' : '위 폼에서 첫 FAQ를 등록해보세요.'}
+            icon={<BookOpen size={24} color="var(--text-secondary)"/>}
+          />
         ) : (
           <>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse', minWidth: '500px' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {['질문','카테고리','등록일',''].map(h => (
+                    {['상태','질문','카테고리','등록일',''].map(h => (
                       <th key={h} style={{ textAlign: 'left', paddingBottom: '10px', paddingRight: '12px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {docs.map((doc: any) => (
-                    <tr key={doc.id} style={{ borderBottom: '1px solid var(--border)' }}
+                    <tr key={doc.id} style={{ borderBottom: '1px solid var(--border)', opacity: doc.is_active === false ? 0.5 : 1 }}
                       onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'var(--bg-primary)'}
                       onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = ''}>
                       {editId === doc.id ? (
-                        <td colSpan={4} style={{ padding: '12px 0' }}>
+                        <td colSpan={5} style={{ padding: '12px 0' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <textarea value={editData.question} onChange={e => setEditData(p => ({...p, question: e.target.value}))}
                               style={{ ...S.textarea, height: '56px', fontSize: '12px' }}/>
@@ -327,6 +399,22 @@ export default function FAQPage() {
                         </td>
                       ) : (
                         <>
+                          {/* 활성/비활성 토글 */}
+                          <td style={{ padding: '12px 12px 12px 0', width: '50px' }}>
+                            <button
+                              onClick={() => handleToggle(doc)}
+                              disabled={togglingId === doc.id}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px', color: doc.is_active !== false ? '#059669' : 'var(--text-secondary)' }}
+                              title={doc.is_active !== false ? '활성 (클릭하여 비활성화)' : '비활성 (클릭하여 활성화)'}
+                            >
+                              {togglingId === doc.id
+                                ? <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }}/>
+                                : doc.is_active !== false
+                                  ? <ToggleRight size={22}/>
+                                  : <ToggleLeft size={22}/>
+                              }
+                            </button>
+                          </td>
                           <td style={{ padding: '12px 12px 12px 0', maxWidth: '280px' }}>
                             <p style={{ fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.refined_question || doc.original_question}</p>
                             <p style={{ fontSize: '12px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '2px' }}>{doc.refined_answer || doc.original_answer}</p>
@@ -386,8 +474,7 @@ export default function FAQPage() {
                 style={{ ...S.btnPrimary, flex: 1, opacity: saving ? 0.7 : 1 }}>
                 {saving ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }}/>저장 중...</> : <><Check size={16}/>이대로 저장</>}
               </button>
-              <button onClick={() => setConfirmClose(true)}
-                style={{ ...S.btnSecondary, flex: 1 }}>취소</button>
+              <button onClick={() => setConfirmClose(true)} style={{ ...S.btnSecondary, flex: 1 }}>취소</button>
             </div>
           </div>
         )}
@@ -398,10 +485,8 @@ export default function FAQPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>미리보기를 닫으면 저장되지 않습니다.</p>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button onClick={() => { setConfirmClose(false); setPreviewOpen(false) }}
-              style={{ ...S.btnDanger, flex: 1 }}>취소하기</button>
-            <button onClick={() => setConfirmClose(false)}
-              style={{ ...S.btnSecondary, flex: 1 }}>계속 수정</button>
+            <button onClick={() => { setConfirmClose(false); setPreviewOpen(false) }} style={{ ...S.btnDanger, flex: 1 }}>취소하기</button>
+            <button onClick={() => setConfirmClose(false)} style={{ ...S.btnSecondary, flex: 1 }}>계속 수정</button>
           </div>
         </div>
       </Modal>
@@ -411,10 +496,8 @@ export default function FAQPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>삭제된 FAQ는 복구할 수 없습니다.</p>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button onClick={() => deleteConfirm && handleDelete(deleteConfirm)}
-              style={{ ...S.btnDanger, flex: 1 }}>삭제</button>
-            <button onClick={() => setDeleteConfirm(null)}
-              style={{ ...S.btnSecondary, flex: 1 }}>취소</button>
+            <button onClick={() => deleteConfirm && handleDelete(deleteConfirm)} style={{ ...S.btnDanger, flex: 1 }}>삭제</button>
+            <button onClick={() => setDeleteConfirm(null)} style={{ ...S.btnSecondary, flex: 1 }}>취소</button>
           </div>
         </div>
       </Modal>
