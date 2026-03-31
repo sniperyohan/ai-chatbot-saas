@@ -322,9 +322,20 @@ auth.post('/admin/login', async (c) => {
     }
 
     if (!isNetworkError) {
+      // tenant가 없는 경우 → 로컬 테스트 계정 fallback 시도
       if (dbError || !tenant) {
-        return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
+        // PGRST116: no rows found → 테스트 계정 fallback 허용
+        const notFoundErr = dbError?.message?.includes('PGRST116') || dbError?.message?.includes('no rows') || dbError?.message?.includes('JSON object requested') || !tenant
+        if (notFoundErr) {
+          console.log('[DEBUG][admin/login] DB에 없음, 테스트 계정 fallback 시도:', email)
+          isNetworkError = true
+        } else {
+          return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
+        }
       }
+    }
+
+    if (!isNetworkError && tenant) {
 
       // 계정 활성화 확인
       if (!tenant.is_active) {
