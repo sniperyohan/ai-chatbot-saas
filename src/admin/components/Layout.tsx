@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, BookOpen, MessageSquare, GitBranch,
-  Settings, Code2, Bot, Sun, Moon, ChevronDown, LogOut, KeyRound, User, AlertTriangle
+  Settings, Code2, Bot, Sun, Moon, ChevronDown, LogOut, KeyRound, User, AlertTriangle, BarChart2
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useDarkMode } from '../hooks/useDarkMode'
@@ -12,12 +12,13 @@ import ChangePasswordModal from './ChangePasswordModal'
 import { api } from '../lib/api'
 
 const tabs = [
-  { key: 'dashboard', label: '대시보드',   icon: LayoutDashboard, path: '/admin/dashboard',  title: '대시보드' },
-  { key: 'faq',       label: 'FAQ 관리',   icon: BookOpen,         path: '/admin/faq',         title: 'FAQ 관리' },
-  { key: 'logs',      label: '대화 로그',  icon: MessageSquare,    path: '/admin/logs',        title: '대화 로그' },
-  { key: 'scenarios', label: '시나리오',   icon: GitBranch,        path: '/admin/scenarios',   title: '시나리오' },
-  { key: 'settings',  label: '봇 설정',    icon: Settings,         path: '/admin/settings',    title: '챗봇 설정' },
-  { key: 'install',   label: '위젯 가이드', icon: Code2,            path: '/admin/install',     title: '위젯 설치 가이드' },
+  { key: 'dashboard',  label: '대시보드',   icon: LayoutDashboard, path: '/admin/dashboard',  title: '대시보드' },
+  { key: 'faq',        label: 'FAQ 관리',   icon: BookOpen,         path: '/admin/faq',         title: 'FAQ 관리' },
+  { key: 'logs',       label: '대화 로그',  icon: MessageSquare,    path: '/admin/logs',        title: '대화 로그' },
+  { key: 'analytics',  label: '분석',       icon: BarChart2,        path: '/admin/analytics',   title: '질문 TOP10 분석' },
+  { key: 'scenarios',  label: '시나리오',   icon: GitBranch,        path: '/admin/scenarios',   title: '시나리오' },
+  { key: 'settings',   label: '봇 설정',    icon: Settings,         path: '/admin/settings',    title: '챗봇 설정' },
+  { key: 'install',    label: '위젯 가이드', icon: Code2,            path: '/admin/install',     title: '위젯 설치 가이드' },
 ]
 
 const PLAN_LIMIT: Record<string, number> = { basic: 50, pro: 200, master: -1 }

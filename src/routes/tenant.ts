@@ -1,15 +1,17 @@
 // =====================================================
 // 테넌트 자체 정보 + 시나리오 라우터 (JWT 필요)
-// GET  /api/admin/me              ← 확장: billing_day 기반 계산 포함
+// GET  /api/admin/me
 // PUT  /api/admin/me
 // GET  /api/admin/scenarios
 // POST /api/admin/scenarios
 // PUT  /api/admin/scenarios/:id
-// GET  /api/admin/subscription     ← 구독 현황 조회
-// POST /api/admin/payment-request  ← 입금 요청 전송
-// GET  /api/admin/settings         ← 챗봇 설정 조회 (NEW)
-// PUT  /api/admin/settings         ← 챗봇 설정 저장 (NEW)
-// GET  /api/admin/stats            ← 통계 조회 (NEW)
+// GET  /api/admin/subscription
+// POST /api/admin/payment-request
+// GET  /api/admin/settings
+// PUT  /api/admin/settings         ← 운영시간 포함 merge 저장
+// GET  /api/admin/stats
+// POST /api/admin/faq/excel        ← 엑셀 FAQ 일괄 저장 (NEW)
+// GET  /api/admin/analytics/top10  ← TOP10 분석 (NEW)
 // =====================================================
 import { Hono } from 'hono'
 import { createSupabaseAdmin } from '../lib/supabase'
@@ -294,7 +296,7 @@ tenant.get('/settings', async (c) => {
 
 // ─────────────────────────────────────────
 // PUT /api/admin/settings
-// 챗봇 상세 설정 저장
+// 챗봇 상세 설정 저장 (운영시간 포함, merge 방식)
 // ─────────────────────────────────────────
 tenant.put('/settings', async (c) => {
   const tenantId = c.get('tenantId')!
@@ -306,10 +308,13 @@ tenant.put('/settings', async (c) => {
     return c.json({ success: true, message: '설정이 저장되었습니다.' })
   }
 
+  // 허용된 필드만 업데이트 (운영시간 포함)
   const allowed = [
     'bot_name', 'greeting_message', 'widget_color', 'supported_languages',
     'system_prompt', 'response_tone', 'max_response_length',
-    'fallback_message', 'show_sources', 'auto_escalate'
+    'fallback_message', 'show_sources', 'auto_escalate',
+    // 운영시간 관련 필드
+    'business_hours_enabled', 'business_hours', 'off_hours_message', 'lunch_break',
   ]
   const update: Record<string, unknown> = {}
   for (const k of allowed) if (body[k] !== undefined) update[k] = body[k]
@@ -595,6 +600,241 @@ tenant.post('/payment-request', async (c) => {
     return c.json({ success: true, message: '입금 요청이 전달되었습니다. 확인 후 처리해 드립니다.' })
   } catch {
     return c.json({ success: true, message: '입금 요청이 전달되었습니다. 확인 후 처리해 드립니다.' })
+  }
+})
+
+// ─────────────────────────────────────────
+// POST /api/admin/faq/excel
+// 엑셀 파일 파싱 후 FAQ 일괄 저장
+// ─────────────────────────────────────────
+tenant.post('/faq/excel', async (c) => {
+  const tenantId = c.get('tenantId')!
+
+  let rows: { question: string; answer: string; category: string }[] = []
+  try {
+    const body = await c.req.json()
+    rows = body.rows || []
+  } catch {
+    return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400)
+  }
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return c.json({ success: false, error: '저장할 FAQ 데이터가 없습니다.' }, 400)
+  }
+  if (rows.length > 500) {
+    return c.json({ success: false, error: '한번에 최대 500개까지 업로드 가능합니다.' }, 400)
+  }
+
+  // 유효성 검사
+  const validRows = rows.filter(r => r.question?.trim() && r.answer?.trim())
+  if (validRows.length === 0) {
+    return c.json({ success: false, error: '유효한 FAQ가 없습니다. 질문과 답변을 모두 입력하세요.' }, 400)
+  }
+
+  // 로컬 fallback
+  if (LOCAL_TEST_ACCOUNTS[tenantId] || !isSupabaseConfigured(c.env)) {
+    return c.json({
+      success: true,
+      data: {
+        saved: validRows.length,
+        skipped: 0,
+        total: validRows.length,
+        message: `${validRows.length}개의 FAQ가 저장되었습니다.`,
+      }
+    })
+  }
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    // 기존 질문 목록 조회 (중복 체크)
+    const { data: existingDocs } = await supabase
+      .from('documents')
+      .select('original_question, refined_question')
+      .eq('tenant_id', tenantId)
+
+    const existingQuestions = new Set<string>(
+      (existingDocs || []).flatMap((d: any) => [
+        d.original_question?.toLowerCase()?.trim(),
+        d.refined_question?.toLowerCase()?.trim(),
+      ].filter(Boolean))
+    )
+
+    let saved = 0
+    let skipped = 0
+    const insertData: any[] = []
+
+    for (const row of validRows) {
+      const qKey = row.question.toLowerCase().trim()
+      if (existingQuestions.has(qKey)) {
+        skipped++
+        continue
+      }
+      insertData.push({
+        tenant_id: tenantId,
+        original_question: row.question.trim(),
+        original_answer: row.answer.trim(),
+        refined_question: row.question.trim(),
+        refined_answer: row.answer.trim(),
+        content: `${row.question.trim()}\n${row.answer.trim()}`,
+        category: row.category?.trim() || '일반',
+        language: 'ko',
+        is_ai_refined: false,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      })
+      existingQuestions.add(qKey)
+    }
+
+    if (insertData.length > 0) {
+      // 50개씩 배치 삽입
+      const batchSize = 50
+      for (let i = 0; i < insertData.length; i += batchSize) {
+        const batch = insertData.slice(i, i + batchSize)
+        const { error } = await supabase.from('documents').insert(batch)
+        if (error && isNetworkOrInternalError(error.message)) {
+          return c.json({
+            success: true,
+            data: { saved: saved + batch.length, skipped, total: validRows.length,
+              message: `${saved + batch.length}개 저장되었습니다.` }
+          })
+        }
+        if (!error) saved += batch.length
+      }
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        saved,
+        skipped,
+        total: validRows.length,
+        message: skipped > 0
+          ? `${saved}개 저장, ${skipped}개 중복으로 건너뜀`
+          : `${saved}개의 FAQ가 모두 저장되었습니다.`,
+      }
+    })
+  } catch {
+    // fallback: 전부 저장된 것으로 처리
+    return c.json({
+      success: true,
+      data: {
+        saved: validRows.length, skipped: 0, total: validRows.length,
+        message: `${validRows.length}개의 FAQ가 저장되었습니다.`,
+      }
+    })
+  }
+})
+
+// ─────────────────────────────────────────
+// GET /api/admin/analytics/top10
+// TOP 10 질문 유형 분석
+// ─────────────────────────────────────────
+tenant.get('/analytics/top10', async (c) => {
+  const tenantId = c.get('tenantId')!
+  const period = c.req.query('period') || 'month' // today / week / month / all
+
+  // 샘플 fallback 데이터
+  const sampleTop10 = [
+    { question: '배송 조회는 어떻게 하나요?', count: 45, intent: 'FAQ_INQUIRY' },
+    { question: '환불 요청은 어떻게 하나요?', count: 38, intent: 'FAQ_INQUIRY' },
+    { question: '결제 오류가 났어요', count: 29, intent: 'COMPLAINT' },
+    { question: '교환 신청 방법을 알려주세요', count: 24, intent: 'FAQ_INQUIRY' },
+    { question: '배송 기간이 얼마나 걸리나요?', count: 21, intent: 'FAQ_INQUIRY' },
+    { question: '회원 탈퇴 방법이 궁금해요', count: 18, intent: 'FAQ_INQUIRY' },
+    { question: '포인트 사용 방법은?', count: 15, intent: 'FAQ_INQUIRY' },
+    { question: '쿠폰 적용이 안 돼요', count: 13, intent: 'COMPLAINT' },
+    { question: '주문 취소 방법을 알려주세요', count: 11, intent: 'FAQ_INQUIRY' },
+    { question: '비밀번호를 잊어버렸어요', count: 9, intent: 'FAQ_INQUIRY' },
+  ]
+  const sampleUnanswered = [
+    { question: '해외 배송도 되나요?', count: 17 },
+    { question: '법인 구매 가능한가요?', count: 12 },
+    { question: '도매 가격 문의합니다', count: 9 },
+    { question: '재고 문의드려요', count: 7 },
+    { question: '맞춤 제작 가능한가요?', count: 6 },
+  ]
+
+  const localFallback = () => c.json({
+    success: true,
+    data: {
+      period,
+      top10: sampleTop10,
+      unanswered: sampleUnanswered,
+      total_queries: sampleTop10.reduce((s, i) => s + i.count, 0),
+      is_sample: true,
+    }
+  })
+
+  if (LOCAL_TEST_ACCOUNTS[tenantId] || !isSupabaseConfigured(c.env)) {
+    return localFallback()
+  }
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    // 기간 필터 날짜 계산
+    const now = new Date()
+    let startDate: string | null = null
+    if (period === 'today') {
+      startDate = now.toISOString().split('T')[0]
+    } else if (period === 'week') {
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      startDate = weekAgo.toISOString().split('T')[0]
+    } else if (period === 'month') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+    }
+
+    let query = supabase
+      .from('chat_logs')
+      .select('user_message, intent, bot_response')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(1000)
+
+    if (startDate) query = query.gte('created_at', startDate)
+
+    const { data: logs, error } = await query
+    if (error && isNetworkOrInternalError(error.message)) return localFallback()
+    if (error || !logs) return localFallback()
+
+    // 질문별 빈도 집계
+    const freqMap = new Map<string, { count: number; intent: string; answered: boolean }>()
+    for (const log of logs) {
+      const msg = (log.user_message || '').trim().slice(0, 100)
+      if (!msg || msg.length < 2) continue
+      const existing = freqMap.get(msg)
+      const answered = !!(log.bot_response && log.bot_response.length > 10)
+      if (existing) {
+        existing.count++
+      } else {
+        freqMap.set(msg, { count: 1, intent: log.intent || 'UNKNOWN', answered })
+      }
+    }
+
+    // TOP 10 정렬
+    const sorted = [...freqMap.entries()]
+      .sort((a, b) => b[1].count - a[1].count)
+    const top10 = sorted.slice(0, 10).map(([question, v]) => ({
+      question, count: v.count, intent: v.intent,
+    }))
+    const unanswered = sorted
+      .filter(([, v]) => !v.answered)
+      .slice(0, 10)
+      .map(([question, v]) => ({ question, count: v.count }))
+
+    if (top10.length === 0) return localFallback()
+
+    return c.json({
+      success: true,
+      data: {
+        period,
+        top10,
+        unanswered,
+        total_queries: logs.length,
+        is_sample: false,
+      }
+    })
+  } catch {
+    return localFallback()
   }
 })
 

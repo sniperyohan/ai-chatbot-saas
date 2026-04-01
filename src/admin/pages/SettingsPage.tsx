@@ -1,10 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Bot, Palette, Globe, Loader2, Save, MessageCircle, Info, CheckCircle } from 'lucide-react'
+import { Bot, Palette, Globe, Loader2, Save, MessageCircle, Info, CheckCircle, Clock, AlertTriangle } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../hooks/useToast'
 import ToastContainer from '../components/Toast'
 import { S } from '../lib/ui'
+
+// 운영시간 타입
+interface DaySchedule {
+  enabled: boolean
+  start: string
+  end: string
+  lunch_start: string
+  lunch_end: string
+  lunch_enabled: boolean
+}
+interface BusinessHours {
+  [day: string]: DaySchedule
+}
 
 const COLORS = ['#4F46E5','#10B981','#EF4444','#F59E0B','#8B5CF6','#06B6D4','#EC4899','#14B8A6','#F97316','#6366F1']
 const LANGUAGES = [
@@ -18,6 +31,50 @@ const TONES = [
   { v: 'casual',      l: '🤙 캐주얼',     desc: '가볍고 편안한 말투' },
   { v: 'formal',      l: '🏛️ 공식적',    desc: '공적이고 정중한 말투' },
 ]
+
+const DAY_NAMES: Record<string, string> = {
+  mon: '월요일', tue: '화요일', wed: '수요일', thu: '목요일',
+  fri: '금요일', sat: '토요일', sun: '일요일',
+}
+const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+
+const DEFAULT_SCHEDULE: DaySchedule = {
+  enabled: true, start: '09:00', end: '18:00',
+  lunch_start: '12:00', lunch_end: '13:00', lunch_enabled: false,
+}
+
+function makeDefaultHours(): BusinessHours {
+  const h: BusinessHours = {}
+  DAY_KEYS.forEach(d => {
+    h[d] = { ...DEFAULT_SCHEDULE, enabled: !['sat', 'sun'].includes(d) }
+  })
+  return h
+}
+
+// 현재 운영 중인지 체크
+function checkIsOperating(enabled: boolean, hours: BusinessHours): boolean {
+  if (!enabled) return true // 비활성화면 항상 운영 중
+  const now = new Date()
+  const dayIdx = now.getDay() // 0=Sun
+  const dayKeyMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+  const dayKey = dayKeyMap[dayIdx]
+  const day = hours[dayKey]
+  if (!day?.enabled) return false
+
+  const hhmm = now.getHours() * 60 + now.getMinutes()
+  const [sh, sm] = (day.start || '09:00').split(':').map(Number)
+  const [eh, em] = (day.end || '18:00').split(':').map(Number)
+  const startMin = sh * 60 + sm
+  const endMin = eh * 60 + em
+  if (hhmm < startMin || hhmm >= endMin) return false
+
+  if (day.lunch_enabled) {
+    const [lsh, lsm] = (day.lunch_start || '12:00').split(':').map(Number)
+    const [leh, lem] = (day.lunch_end || '13:00').split(':').map(Number)
+    if (hhmm >= lsh * 60 + lsm && hhmm < leh * 60 + lem) return false
+  }
+  return true
+}
 
 // 툴팁 컴포넌트
 function Tooltip({ text }: { text: string }) {
@@ -87,6 +144,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  // 운영시간 상태
+  const [bizEnabled, setBizEnabled] = useState(false)
+  const [bizHours, setBizHours] = useState<BusinessHours>(makeDefaultHours())
+  const [offHoursMsg, setOffHoursMsg] = useState('현재 운영시간이 아닙니다. 운영시간에 다시 문의해 주세요.')
+  const isOperating = checkIsOperating(bizEnabled, bizHours)
+
   // 미리보기
   const [chatInput, setChatInput] = useState('')
   const [chatHistory, setChatHistory] = useState<{role:'user'|'bot'; text:string}[]>([])
@@ -107,6 +170,10 @@ export default function SettingsPage() {
         setShowSources(d.show_sources !== undefined ? d.show_sources : true)
         setAutoEscalate(d.auto_escalate || false)
         setChatHistory([{ role: 'bot', text: d.greeting_message || '안녕하세요! 무엇을 도와드릴까요? 😊' }])
+        // 운영시간 설정 로드
+        if (d.business_hours_enabled !== undefined) setBizEnabled(d.business_hours_enabled)
+        if (d.business_hours) setBizHours(d.business_hours)
+        if (d.off_hours_message) setOffHoursMsg(d.off_hours_message)
       }
     }).catch(() => {
       setChatHistory([{ role: 'bot', text: greeting }])
@@ -141,6 +208,10 @@ export default function SettingsPage() {
         fallback_message: fallbackMsg,
         show_sources: showSources,
         auto_escalate: autoEscalate,
+        // 운영시간
+        business_hours_enabled: bizEnabled,
+        business_hours: bizHours,
+        off_hours_message: offHoursMsg,
       })
       updateTenant({ bot_name: botName, greeting_message: greeting, widget_color: color })
       setSaved(true)
@@ -356,6 +427,131 @@ export default function SettingsPage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* 운영시간 설정 */}
+          <div style={S.card}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Clock size={18} color="var(--primary)"/>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>운영시간 설정</h3>
+                <Tooltip text="운영시간 모드를 활성화하면, 설정한 시간 외에는 자동 응답 메시지만 발송됩니다.\n비활성화하면 24시간 운영입니다."/>
+              </div>
+              {/* 운영시간 활성화 토글 + 실시간 상태 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '5px',
+                  fontSize: '12px', fontWeight: 600, padding: '4px 10px', borderRadius: '9999px',
+                  background: isOperating ? 'rgba(5,150,105,0.1)' : 'rgba(239,68,68,0.1)',
+                  color: isOperating ? '#059669' : '#DC2626',
+                }}>
+                  <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: isOperating ? '#059669' : '#DC2626', flexShrink: 0 }}/>
+                  {isOperating ? '운영 중' : '운영 외 시간'}
+                </span>
+                <div onClick={() => setBizEnabled(v => !v)} style={{
+                  position: 'relative', width: '44px', height: '24px', borderRadius: '9999px', cursor: 'pointer',
+                  background: bizEnabled ? 'var(--primary)' : 'var(--border)', transition: 'background 0.2s',
+                }}>
+                  <span style={{ position: 'absolute', top: '2px', left: '2px', width: '20px', height: '20px', borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'transform 0.2s', transform: bizEnabled ? 'translateX(20px)' : 'translateX(0)' }}/>
+                </div>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: bizEnabled ? 'var(--primary)' : 'var(--text-secondary)' }}>
+                  {bizEnabled ? '운영시간 모드' : '24시간 운영'}
+                </span>
+              </div>
+            </div>
+
+            {bizEnabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {/* 요일별 시간 설정 */}
+                <div style={{ border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
+                  {DAY_KEYS.map((day, idx) => {
+                    const sched = bizHours[day] || { ...DEFAULT_SCHEDULE }
+                    const updateDay = (patch: Partial<DaySchedule>) => {
+                      setBizHours(prev => ({ ...prev, [day]: { ...sched, ...patch } }))
+                    }
+                    return (
+                      <div key={day} style={{
+                        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px',
+                        padding: '12px 14px',
+                        background: sched.enabled ? 'transparent' : 'var(--bg-primary)',
+                        borderBottom: idx < DAY_KEYS.length - 1 ? '1px solid var(--border)' : 'none',
+                        opacity: sched.enabled ? 1 : 0.55,
+                      }}>
+                        {/* 요일 ON/OFF 토글 */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '90px' }}>
+                          <div onClick={() => updateDay({ enabled: !sched.enabled })} style={{
+                            position: 'relative', width: '36px', height: '20px', borderRadius: '9999px', cursor: 'pointer',
+                            background: sched.enabled ? 'var(--primary)' : 'var(--border)', transition: 'background 0.2s', flexShrink: 0,
+                          }}>
+                            <span style={{ position: 'absolute', top: '2px', left: '2px', width: '16px', height: '16px', borderRadius: '50%', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.2)', transition: 'transform 0.2s', transform: sched.enabled ? 'translateX(16px)' : 'translateX(0)' }}/>
+                          </div>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', width: '42px' }}>{DAY_NAMES[day].slice(0, 3)}</span>
+                        </div>
+
+                        {sched.enabled && (
+                          <>
+                            {/* 시작/종료 시간 */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <input type="time" value={sched.start} onChange={e => updateDay({ start: e.target.value })}
+                                style={{ ...S.input, width: '110px', minHeight: '34px', fontSize: '13px', padding: '4px 8px' }}/>
+                              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>~</span>
+                              <input type="time" value={sched.end} onChange={e => updateDay({ end: e.target.value })}
+                                style={{ ...S.input, width: '110px', minHeight: '34px', fontSize: '13px', padding: '4px 8px' }}/>
+                            </div>
+
+                            {/* 점심 휴게 */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', userSelect: 'none' }}>
+                                <input type="checkbox" checked={sched.lunch_enabled} onChange={e => updateDay({ lunch_enabled: e.target.checked })}
+                                  style={{ accentColor: 'var(--primary)', width: '14px', height: '14px', cursor: 'pointer' }}/>
+                                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>점심 휴게</span>
+                              </label>
+                              {sched.lunch_enabled && (
+                                <>
+                                  <input type="time" value={sched.lunch_start} onChange={e => updateDay({ lunch_start: e.target.value })}
+                                    style={{ ...S.input, width: '100px', minHeight: '32px', fontSize: '12px', padding: '3px 7px' }}/>
+                                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>~</span>
+                                  <input type="time" value={sched.lunch_end} onChange={e => updateDay({ lunch_end: e.target.value })}
+                                    style={{ ...S.input, width: '100px', minHeight: '32px', fontSize: '12px', padding: '3px 7px' }}/>
+                                </>
+                              )}
+                            </div>
+                          </>
+                        )}
+                        {!sched.enabled && (
+                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic' }}>휴무</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* 운영 외 시간 자동 응답 메시지 */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ ...S.label, margin: 0 }}>운영 외 시간 자동 응답</label>
+                    <Tooltip text="운영시간이 아닐 때 고객에게 자동으로 발송되는 메시지입니다."/>
+                  </div>
+                  <textarea value={offHoursMsg} onChange={e => setOffHoursMsg(e.target.value)}
+                    style={{ ...S.textarea, height: '70px' }}
+                    placeholder="현재 운영시간이 아닙니다. 운영시간에 다시 문의해 주세요." maxLength={200}/>
+                  <p style={{ fontSize: '11px', textAlign: 'right', color: 'var(--text-secondary)', marginTop: '4px' }}>{offHoursMsg.length}/200자</p>
+                </div>
+
+                {/* 경고 */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '10px 14px', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '8px' }}>
+                  <AlertTriangle size={14} color="#D97706" style={{ flexShrink: 0, marginTop: '1px' }}/>
+                  <p style={{ fontSize: '12px', color: '#92400E', lineHeight: 1.5 }}>
+                    운영시간 외 메시지는 AI 답변 없이 자동 응답 메시지만 발송됩니다. 저장 후 즉시 적용됩니다.
+                  </p>
+                </div>
+              </div>
+            )}
+            {!bizEnabled && (
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', padding: '4px 0' }}>
+                현재 24시간 운영 모드입니다. 운영시간 모드를 활성화하면 요일·시간별 설정이 가능합니다.
+              </p>
+            )}
           </div>
 
           {/* 저장 버튼 (하단) */}

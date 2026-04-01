@@ -90,4 +90,12 @@ export const api = {
   getSubscription: () => request<any>('GET', '/admin/subscription'),
   sendPaymentRequest: (payment_memo: string) =>
     request<any>('POST', '/admin/payment-request', { payment_memo }),
+
+  // FAQ 엑셀 업로드 (NEW)
+  uploadFaqExcel: (rows: { question: string; answer: string; category: string }[]) =>
+    request<any>('POST', '/admin/faq/excel', { rows }),
+
+  // TOP10 분석 (NEW)
+  getTop10: (period: string = 'month') =>
+    request<any>('GET', `/admin/analytics/top10?period=${period}`),
 }
