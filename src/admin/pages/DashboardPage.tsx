@@ -291,9 +291,7 @@ function SubscriptionCard({ tenantPlan }: { tenantPlan: string }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: '200px' }}>
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{sub.payment_settings.bank_name}</span>
-                <span style={{ fontSize: '14px', color: 'var(--text-secondary)', marginLeft: '8px' }}>{sub.payment_settings.account_number}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text-secondary)', marginLeft: '6px' }}>
-  {sub.payment_settings.account_holder}</span>
+
 </div>
 
 {/* 토글 버튼 */}

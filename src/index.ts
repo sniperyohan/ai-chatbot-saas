@@ -53,6 +53,8 @@ app.route('/api', chatRouter)
 
 // FAQ 문서 관리 (JWT 필요)
 app.route('/api/documents', documentsRouter)
+// Admin 경로로도 마운트 (/api/admin/documents/refine, /api/admin/documents/bulk-embed)
+app.route('/api/admin/documents', documentsRouter)
 
 // 통계 / 로그 (JWT 필요)
 app.route('/api/admin', statsRouter)
@@ -78,7 +80,7 @@ const ADMIN_HTML = `<!DOCTYPE html>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <script type="module" crossorigin src="/admin/assets/index-hdsr7Ggr-v2.js"></script>
+  <script type="module" crossorigin src="/admin/assets/index-PGY6wLVI-v2.js"></script>
   <link rel="modulepreload" crossorigin href="/admin/assets/react-vendor-B7hvkJMs-v2.js">
   <link rel="modulepreload" crossorigin href="/admin/assets/lucide-vendor-5B2l2DRB-v2.js">
   <link rel="modulepreload" crossorigin href="/admin/assets/recharts-vendor-C7OM07X2-v2.js">
