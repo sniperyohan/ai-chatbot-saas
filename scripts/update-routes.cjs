@@ -17,7 +17,6 @@ const routes = {
     '/admin/assets/*',
     '/static/*',
     '/widget.js',
-    '/widget-test.html',
     '/favicon.ico',
     '/favicon.svg',
   ],
