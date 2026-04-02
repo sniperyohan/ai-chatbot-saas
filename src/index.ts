@@ -6,6 +6,10 @@ import { Hono } from 'hono'
 import { createCorsMiddleware, securityHeadersMiddleware } from './middleware/security'
 import { Bindings, Variables } from './types'
 
+// 정적 파일 (위젯) - Vite ?raw import로 번들에 포함
+import WIDGET_JS_RAW   from '../public/widget.js?raw'
+import WIDGET_TEST_RAW from '../public/widget-test.html?raw'
+
 // 라우터 임포트
 import authRouter from './routes/auth'
 import chatRouter from './routes/chat'
@@ -97,6 +101,28 @@ app.get('/admin/*', (c) => {
   // 정적 에셋은 Cloudflare Pages가 서빙
   if (path.includes('/assets/')) return c.notFound()
   return c.html(ADMIN_HTML)
+})
+
+// ─────────────────────────────────────────
+// 위젯 정적 파일 서빙 (Worker에서 직접)
+// ─────────────────────────────────────────
+app.get('/widget.js', (c) => {
+  return new Response(WIDGET_JS_RAW, {
+    headers: {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+      'Access-Control-Allow-Origin': '*',
+    },
+  })
+})
+
+app.get('/widget-test.html', (c) => {
+  return new Response(WIDGET_TEST_RAW, {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+    },
+  })
 })
 
 // favicon 처리
