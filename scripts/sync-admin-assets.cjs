@@ -107,3 +107,27 @@ if (!assetBlockRegex.test(indexTs)) {
   fs.writeFileSync(indexTsPath, updated, 'utf-8');
   console.log('✅ src/index.ts asset 파일명 업데이트 완료');
 }
+
+// ──────────────────────────────────────────────────────────
+// _routes.json 업데이트: widget.js, widget-test.html 추가
+// ──────────────────────────────────────────────────────────
+const distDir = path.join(__dirname, '..', 'dist');
+const routesPath = path.join(distDir, '_routes.json');
+const routes = {
+  version: 1,
+  include: ['/*'],
+  exclude: [
+    '/admin/assets/*',
+    '/static/*',
+    '/widget.js',
+    '/widget-test.html',
+    '/favicon.ico',
+    '/favicon.svg',
+  ],
+};
+if (fs.existsSync(distDir)) {
+  fs.writeFileSync(routesPath, JSON.stringify(routes, null, 2), 'utf-8');
+  console.log('✅ dist/_routes.json 업데이트 완료 (widget.js, widget-test.html 정적 서빙)');
+} else {
+  console.warn('⚠️  dist/ 디렉토리 없음 - 빌드 후 _routes.json이 자동 업데이트됩니다.');
+}

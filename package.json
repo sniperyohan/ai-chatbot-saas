@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "vite",
     "dev:sandbox": "wrangler pages dev dist --ip 0.0.0.0 --port 3000",
-    "build": "npm run build:admin && node scripts/sync-admin-assets.cjs && npm run build:worker",
+    "build": "npm run build:admin && node scripts/sync-admin-assets.cjs && npm run build:worker && node scripts/update-routes.cjs",
     "build:worker": "npx vite build",
     "build:admin": "npx vite build --config vite.admin.config.ts",
     "preview": "wrangler pages dev dist",

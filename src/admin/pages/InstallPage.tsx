@@ -280,41 +280,93 @@ export default function InstallPage() {
   const { tenant } = useAuth()
   const [activePlatform, setActivePlatform] = useState('cafe24')
 
-  const tenantId = tenant?.id || 'YOUR_TENANT_ID'
-  const domain = 'https://ai-chatbot-saas-1cb.pages.dev'
-  const widgetScript = `<script\n  src="${domain}/widget.js"\n  data-tenant="${tenantId}"\n  defer\n></script>`
+  const tenantId    = tenant?.id           || 'YOUR_TENANT_ID'
+  const widgetColor = tenant?.widget_color || '#4F46E5'
+  const botName     = tenant?.bot_name     || 'AI 상담봇'
+  const greeting    = tenant?.greeting_message || '안녕하세요! 무엇을 도와드릴까요? 😊'
+  const domain      = 'https://ai-chatbot-saas-1cb.pages.dev'
+
+  /* ── 설치 코드 1: data-tenant 속성 방식 (간단) ── */
+  const widgetScript = `<script\n  src="${domain}/widget.js"\n  data-tenant="${tenantId}"\n  data-color="${widgetColor}"\n  data-bot-name="${botName}"\n  defer\n></script>`
+
+  /* ── 설치 코드 2: ChatbotWidget.init() 방식 (고급) ── */
+  const initScript = `<script>
+  (function() {
+    var s = document.createElement('script');
+    s.src = '${domain}/widget.js';
+    s.onload = function() {
+      ChatbotWidget.init({
+        tenantId: '${tenantId}',
+        apiUrl:   '${domain}',
+        color:    '${widgetColor}',
+        botName:  '${botName}',
+        greeting: '${greeting}'
+      });
+    };
+    document.head.appendChild(s);
+  })();
+</script>`
 
   const currentPlatform = PLATFORMS.find(p => p.id === activePlatform)!
   const steps = getSteps(activePlatform, widgetScript, tenantId)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>위젯 설치 가이드</h2>
         <span style={{ fontSize: '12px', fontWeight: 600, padding: '3px 10px', borderRadius: '9999px', background: 'rgba(79,70,229,0.1)', color: 'var(--primary)' }}>
           Tenant ID: {tenantId.slice(0, 16)}{tenantId.length > 16 ? '...' : ''}
         </span>
       </div>
 
-      {/* 위젯 스크립트 코드 */}
+      {/* ── 설치 코드 공통 섹션 ── */}
       <div style={{ ...S.card }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
           <span style={{ fontSize: '18px' }}>📋</span>
-          <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>설치 코드 (공통)</h3>
+          <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>설치 코드</h3>
         </div>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.6 }}>
-          아래 코드를 웹사이트의 <code style={{ background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', color: 'var(--primary)', fontFamily: 'monospace' }}>&lt;/body&gt;</code> 태그 앞에 붙여넣으세요. 귀사의 Tenant ID가 자동으로 포함되어 있습니다.
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.6 }}>
+          아래 두 가지 방식 중 하나를 선택해 웹사이트의{' '}
+          <code style={{ background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', color: 'var(--primary)', fontFamily: 'monospace' }}>&lt;/body&gt;</code>
+          {' '}태그 앞에 붙여넣으세요.
         </p>
-        <CodeBox code={widgetScript} lang="html"/>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginTop: '4px' }}>
-          <CopyButton text={widgetScript} label="전체 코드 복사" size="md"/>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            Tenant ID: <code style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--primary)' }}>{tenantId}</code>
-          </span>
+
+        {/* 방식 1 */}
+        <div style={{ marginBottom: '18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 700, padding: '2px 8px', borderRadius: '9999px', background: 'rgba(79,70,229,0.1)', color: 'var(--primary)' }}>방식 1</span>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>간단 설치 (data-tenant 속성)</span>
+          </div>
+          <CodeBox code={widgetScript} lang="html"/>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginTop: '4px' }}>
+            <CopyButton text={widgetScript} label="코드 복사" size="md"/>
+            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+              Tenant ID: <code style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--primary)' }}>{tenantId}</code>
+            </span>
+          </div>
+        </div>
+
+        {/* 방식 2 */}
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 700, padding: '2px 8px', borderRadius: '9999px', background: 'rgba(5,150,105,0.1)', color: '#059669' }}>방식 2</span>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>고급 설치 (ChatbotWidget.init)</span>
+          </div>
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px', lineHeight: 1.6 }}>
+            색상·봇이름·인사말이 자동 반영되며, 동적 로딩이 필요할 때 사용하세요.
+          </p>
+          <CodeBox code={initScript} lang="javascript"/>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginTop: '4px' }}>
+            <CopyButton text={initScript} label="코드 복사" size="md"/>
+            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+              색상: <code style={{ fontFamily: 'monospace', fontWeight: 600, color: widgetColor }}>{widgetColor}</code>
+              {' '}&nbsp;봇이름: <code style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--primary)' }}>{botName}</code>
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* 플랫폼 선택 탭 */}
+      {/* ── 플랫폼 선택 탭 ── */}
       <div style={{ ...S.card }}>
         <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '16px' }}>
           📦 플랫폼별 설치 가이드
@@ -383,26 +435,41 @@ export default function InstallPage() {
         </div>
       </div>
 
-      {/* 고급 설정 */}
+      {/* ── 테스트 링크 ── */}
+      <div style={{ ...S.card }}>
+        <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px' }}>🧪 위젯 테스트</h3>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px', lineHeight: 1.6 }}>
+          설치 전 위젯이 정상 작동하는지 미리 테스트해보세요.
+        </p>
+        <a
+          href={`${domain}/widget-test.html`}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: '8px',
+            padding: '9px 18px', borderRadius: '8px',
+            background: 'var(--primary)', color: '#fff',
+            fontSize: '13px', fontWeight: 600, textDecoration: 'none',
+            minHeight: '36px',
+          }}
+        >
+          <span>🔗</span> 위젯 테스트 페이지 열기
+        </a>
+      </div>
+
+      {/* ── 고급 설정 ── */}
       <div style={{ ...S.card }}>
         <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px' }}>⚙️ 고급 설정 (선택사항)</h3>
         <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px', lineHeight: 1.6 }}>
           위젯의 위치, 색상, 자동 오픈 기능을 커스터마이징할 수 있습니다.
         </p>
         <CodeBox
-          code={`<script
-  src="${domain}/widget.js"
-  data-tenant="${tenantId}"
-  data-position="bottom-right"   <!-- bottom-right | bottom-left -->
-  data-auto-open="false"         <!-- 자동 오픈 여부 -->
-  data-delay="3000"              <!-- 자동 오픈 지연 (ms) -->
-  defer
-></script>`}
+          code={`<script\n  src="${domain}/widget.js"\n  data-tenant="${tenantId}"\n  data-color="${widgetColor}"\n  data-bot-name="${botName}"\n  data-position="bottom-right"\n  data-auto-open="false"\n  data-delay="3000"\n  defer\n></script>`}
           lang="html"
         />
       </div>
 
-      {/* 문의 */}
+      {/* ── 문의 ── */}
       <div style={{ ...S.card, textAlign: 'center', padding: '24px' }}>
         <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>설치가 어려우신가요?</p>
         <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>

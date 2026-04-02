@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 상담봇 위젯 테스트</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #F8F9FA;
+      color: #1F2937;
+      min-height: 100vh;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ────────────────────────────────────────────
+       네비게이션 바
+  ──────────────────────────────────────────── -->
+  <nav style="background:#FFFFFF;border-bottom:1px solid #E5E7EB;padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="width:32px;height:32px;background:#4F46E5;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;">🛍️</div>
+      <span style="font-size:17px;font-weight:700;color:#111827;">ShopDemo</span>
+      <span style="font-size:11px;font-weight:600;padding:2px 8px;background:rgba(79,70,229,0.1);color:#4F46E5;border-radius:9999px;">AI 챗봇 테스트</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:20px;">
+      <a href="#" style="font-size:14px;color:#6B7280;text-decoration:none;">홈</a>
+      <a href="#" style="font-size:14px;color:#6B7280;text-decoration:none;">상품</a>
+      <a href="#" style="font-size:14px;color:#6B7280;text-decoration:none;">이벤트</a>
+      <a href="#" style="font-size:14px;font-weight:600;padding:7px 16px;background:#4F46E5;color:#fff;border-radius:8px;text-decoration:none;">로그인</a>
+    </div>
+  </nav>
+
+  <!-- ────────────────────────────────────────────
+       히어로 배너
+  ──────────────────────────────────────────── -->
+  <section style="background:linear-gradient(135deg,#4F46E5 0%,#7C3AED 100%);padding:72px 24px;text-align:center;">
+    <p style="font-size:13px;font-weight:600;color:rgba(255,255,255,0.7);margin-bottom:10px;letter-spacing:1px;">🎉 SPRING SALE — 최대 70% 할인</p>
+    <h1 style="font-size:clamp(28px,5vw,48px);font-weight:800;color:#FFFFFF;line-height:1.2;margin-bottom:16px;">
+      트렌디한 패션을<br>합리적인 가격으로
+    </h1>
+    <p style="font-size:16px;color:rgba(255,255,255,0.8);margin-bottom:32px;line-height:1.6;">
+      배송, 교환, 환불 등 궁금한 점은<br>오른쪽 하단 채팅 버튼으로 물어보세요! 💬
+    </p>
+    <div style="display:flex;justify-content:center;gap:12px;flex-wrap:wrap;">
+      <a href="#" style="display:inline-block;padding:13px 28px;background:#FFFFFF;color:#4F46E5;border-radius:10px;font-weight:700;font-size:15px;text-decoration:none;">지금 쇼핑하기 →</a>
+      <a href="#" style="display:inline-block;padding:13px 28px;background:rgba(255,255,255,0.15);color:#FFFFFF;border:1.5px solid rgba(255,255,255,0.4);border-radius:10px;font-weight:600;font-size:15px;text-decoration:none;">신상품 보기</a>
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────────────
+       카테고리 메뉴
+  ──────────────────────────────────────────── -->
+  <section style="background:#FFFFFF;padding:24px;border-bottom:1px solid #E5E7EB;">
+    <div style="max-width:1100px;margin:0 auto;display:flex;gap:12px;overflow-x:auto;padding-bottom:4px;">
+      <button style="white-space:nowrap;padding:8px 18px;border-radius:9999px;border:1.5px solid #4F46E5;background:rgba(79,70,229,0.07);color:#4F46E5;font-size:13px;font-weight:600;cursor:pointer;">전체</button>
+      <button style="white-space:nowrap;padding:8px 18px;border-radius:9999px;border:1.5px solid #E5E7EB;background:#FFFFFF;color:#6B7280;font-size:13px;font-weight:500;cursor:pointer;">여성의류</button>
+      <button style="white-space:nowrap;padding:8px 18px;border-radius:9999px;border:1.5px solid #E5E7EB;background:#FFFFFF;color:#6B7280;font-size:13px;font-weight:500;cursor:pointer;">남성의류</button>
+      <button style="white-space:nowrap;padding:8px 18px;border-radius:9999px;border:1.5px solid #E5E7EB;background:#FFFFFF;color:#6B7280;font-size:13px;font-weight:500;cursor:pointer;">신발·가방</button>
+      <button style="white-space:nowrap;padding:8px 18px;border-radius:9999px;border:1.5px solid #E5E7EB;background:#FFFFFF;color:#6B7280;font-size:13px;font-weight:500;cursor:pointer;">액세서리</button>
+      <button style="white-space:nowrap;padding:8px 18px;border-radius:9999px;border:1.5px solid #E5E7EB;background:#FFFFFF;color:#6B7280;font-size:13px;font-weight:500;cursor:pointer;">홈·리빙</button>
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────────────
+       상품 그리드
+  ──────────────────────────────────────────── -->
+  <main style="max-width:1100px;margin:0 auto;padding:32px 24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <h2 style="font-size:18px;font-weight:700;color:#111827;">인기 상품 <span style="font-size:14px;font-weight:400;color:#6B7280;">총 128개</span></h2>
+      <select style="padding:7px 12px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;color:#374151;background:#fff;cursor:pointer;outline:none;">
+        <option>인기순</option>
+        <option>최신순</option>
+        <option>낮은 가격순</option>
+        <option>높은 가격순</option>
+      </select>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px;">
+
+      <!-- 상품 카드 1 -->
+      <div style="background:#FFFFFF;border-radius:14px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.06);transition:box-shadow 0.2s;" onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseleave="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.06)'">
+        <div style="background:linear-gradient(135deg,#FEE2E2,#FCA5A5);height:200px;display:flex;align-items:center;justify-content:center;font-size:60px;position:relative;">
+          👗
+          <span style="position:absolute;top:10px;left:10px;background:#EF4444;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;">SALE</span>
+        </div>
+        <div style="padding:14px;">
+          <p style="font-size:11px;color:#6B7280;margin-bottom:4px;">여성의류</p>
+          <p style="font-size:14px;font-weight:600;color:#111827;margin-bottom:6px;line-height:1.3;">플로럴 린넨 원피스 2024</p>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+            <span style="font-size:16px;font-weight:700;color:#EF4444;">39,900원</span>
+            <span style="font-size:12px;color:#9CA3AF;text-decoration:line-through;">68,000원</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:12px;">
+            <span style="font-size:12px;color:#F59E0B;">★★★★★</span>
+            <span style="font-size:11px;color:#6B7280;">(241)</span>
+          </div>
+          <button style="width:100%;padding:9px;background:#4F46E5;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">장바구니 담기</button>
+        </div>
+      </div>
+
+      <!-- 상품 카드 2 -->
+      <div style="background:#FFFFFF;border-radius:14px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.06);transition:box-shadow 0.2s;" onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseleave="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.06)'">
+        <div style="background:linear-gradient(135deg,#DBEAFE,#93C5FD);height:200px;display:flex;align-items:center;justify-content:center;font-size:60px;position:relative;">
+          👟
+          <span style="position:absolute;top:10px;left:10px;background:#3B82F6;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;">NEW</span>
+        </div>
+        <div style="padding:14px;">
+          <p style="font-size:11px;color:#6B7280;margin-bottom:4px;">신발</p>
+          <p style="font-size:14px;font-weight:600;color:#111827;margin-bottom:6px;line-height:1.3;">에어 쿠션 스니커즈 블루</p>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+            <span style="font-size:16px;font-weight:700;color:#111827;">89,000원</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:12px;">
+            <span style="font-size:12px;color:#F59E0B;">★★★★☆</span>
+            <span style="font-size:11px;color:#6B7280;">(88)</span>
+          </div>
+          <button style="width:100%;padding:9px;background:#4F46E5;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">장바구니 담기</button>
+        </div>
+      </div>
+
+      <!-- 상품 카드 3 -->
+      <div style="background:#FFFFFF;border-radius:14px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.06);transition:box-shadow 0.2s;" onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseleave="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.06)'">
+        <div style="background:linear-gradient(135deg,#D1FAE5,#6EE7B7);height:200px;display:flex;align-items:center;justify-content:center;font-size:60px;position:relative;">
+          👜
+          <span style="position:absolute;top:10px;left:10px;background:#059669;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;">BEST</span>
+        </div>
+        <div style="padding:14px;">
+          <p style="font-size:11px;color:#6B7280;margin-bottom:4px;">가방</p>
+          <p style="font-size:14px;font-weight:600;color:#111827;margin-bottom:6px;line-height:1.3;">미니멀 크로스백 베이지</p>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+            <span style="font-size:16px;font-weight:700;color:#EF4444;">54,000원</span>
+            <span style="font-size:12px;color:#9CA3AF;text-decoration:line-through;">78,000원</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:12px;">
+            <span style="font-size:12px;color:#F59E0B;">★★★★★</span>
+            <span style="font-size:11px;color:#6B7280;">(512)</span>
+          </div>
+          <button style="width:100%;padding:9px;background:#4F46E5;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">장바구니 담기</button>
+        </div>
+      </div>
+
+      <!-- 상품 카드 4 -->
+      <div style="background:#FFFFFF;border-radius:14px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.06);transition:box-shadow 0.2s;" onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseleave="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.06)'">
+        <div style="background:linear-gradient(135deg,#FEF3C7,#FDE68A);height:200px;display:flex;align-items:center;justify-content:center;font-size:60px;">
+          🧥
+        </div>
+        <div style="padding:14px;">
+          <p style="font-size:11px;color:#6B7280;margin-bottom:4px;">남성의류</p>
+          <p style="font-size:14px;font-weight:600;color:#111827;margin-bottom:6px;line-height:1.3;">오버핏 레더 재킷 블랙</p>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+            <span style="font-size:16px;font-weight:700;color:#111827;">129,000원</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:12px;">
+            <span style="font-size:12px;color:#F59E0B;">★★★★☆</span>
+            <span style="font-size:11px;color:#6B7280;">(63)</span>
+          </div>
+          <button style="width:100%;padding:9px;background:#4F46E5;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">장바구니 담기</button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ────────────────────────────────────────────
+       고객 서비스 배너
+  ──────────────────────────────────────────── -->
+  <section style="background:#EEF2FF;padding:32px 24px;margin-top:20px;">
+    <div style="max-width:1100px;margin:0 auto;text-align:center;">
+      <h3 style="font-size:18px;font-weight:700;color:#3730A3;margin-bottom:8px;">💬 궁금한 점이 있으신가요?</h3>
+      <p style="font-size:14px;color:#4338CA;line-height:1.6;">
+        배송 조회, 교환·반품, 상품 문의는 오른쪽 하단의 <strong>채팅 버튼</strong>을 눌러보세요.<br/>
+        AI 상담봇이 즉시 답변해드립니다.
+      </p>
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────────────
+       푸터
+  ──────────────────────────────────────────── -->
+  <footer style="background:#1F2937;color:#9CA3AF;padding:32px 24px;margin-top:40px;">
+    <div style="max-width:1100px;margin:0 auto;">
+      <div style="display:flex;flex-wrap:wrap;gap:32px;margin-bottom:28px;">
+        <div style="min-width:160px;">
+          <p style="font-size:15px;font-weight:700;color:#F9FAFB;margin-bottom:10px;">ShopDemo</p>
+          <p style="font-size:12px;line-height:1.8;">AI 기반 챗봇 위젯<br>테스트 페이지입니다.</p>
+        </div>
+        <div style="min-width:120px;">
+          <p style="font-size:13px;font-weight:600;color:#E5E7EB;margin-bottom:10px;">고객센터</p>
+          <p style="font-size:12px;line-height:2.0;">배송 문의<br>교환·반품<br>결제 문의</p>
+        </div>
+        <div style="min-width:120px;">
+          <p style="font-size:13px;font-weight:600;color:#E5E7EB;margin-bottom:10px;">운영시간</p>
+          <p style="font-size:12px;line-height:2.0;">평일 09:00~18:00<br>점심 12:00~13:00<br>주말 · 공휴일 휴무</p>
+        </div>
+      </div>
+      <div style="border-top:1px solid #374151;padding-top:20px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">
+        <p style="font-size:12px;">© 2024 ShopDemo. AI 챗봇 위젯 테스트 페이지.</p>
+        <div style="display:flex;gap:16px;">
+          <a href="#" style="font-size:12px;color:#9CA3AF;text-decoration:none;">개인정보처리방침</a>
+          <a href="#" style="font-size:12px;color:#9CA3AF;text-decoration:none;">이용약관</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ────────────────────────────────────────────
+       AI 챗봇 위젯 초기화
+       (local-test-basic: 로컬 테스트 계정)
+  ──────────────────────────────────────────── -->
+  <script>
+    (function() {
+      var s = document.createElement('script');
+      s.src = 'https://ai-chatbot-saas-1cb.pages.dev/widget.js';
+      s.onload = function() {
+        ChatbotWidget.init({
+          tenantId: 'local-test-basic',
+          apiUrl:   'https://ai-chatbot-saas-1cb.pages.dev',
+          color:    '#4F46E5',
+          botName:  'ShopBot',
+          greeting: '안녕하세요! ShopDemo 고객센터입니다. 배송, 교환·반품, 상품 문의 등 궁금한 점을 말씀해 주세요. 😊'
+        });
+      };
+      document.head.appendChild(s);
+    })();
+  </script>
+
+</body>
+</html>
