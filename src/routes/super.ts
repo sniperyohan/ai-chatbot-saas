@@ -925,6 +925,10 @@ superRouter.put('/password', async (c) => {
   if (!current_password || !new_password) {
     return c.json({ success: false, error: '현재 비밀번호와 새 비밀번호를 입력하세요.' }, 400)
   }
+  // 비밀번호 72자 제한 (bcrypt 안전 범위)
+  if (current_password.length > 72 || new_password.length > 72) {
+    return c.json({ success: false, error: '비밀번호는 최대 72자까지 입력 가능합니다.' }, 400)
+  }
   if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{8,}$/.test(new_password)) {
     return c.json({ success: false, error: '비밀번호는 8자 이상, 대소문자·숫자·특수문자를 포함해야 합니다.' }, 400)
   }
@@ -1420,6 +1424,98 @@ superRouter.get('/init-db', async (c) => {
   } catch (e: any) { results['admin_seed'] = `❌ ${e.message}` }
 
   return c.json({ success: true, message: 'DB 초기화 완료', results })
+})
+
+// ─────────────────────────────────────────────────────
+// PUT /api/super/tenants/:id/billing  ← 연간 결제 전환
+// body: { billing_cycle: 'yearly' }
+// - next_billing_date = today + 1년
+// - current_period_end = today + 1년 - 1일
+// ─────────────────────────────────────────────────────
+superRouter.put('/tenants/:id/billing', async (c) => {
+  const tenantId = c.req.param('id')
+
+  let body: { billing_cycle?: string }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
+
+  const { billing_cycle } = body
+  if (billing_cycle !== 'yearly') {
+    return c.json({ success: false, error: "billing_cycle은 'yearly'만 지원합니다." }, 400)
+  }
+
+  // 날짜 계산
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  // next_billing_date = today + 1년
+  const nextBillingDate = new Date(today)
+  nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1)
+
+  // current_period_end = today + 1년 - 1일
+  const currentPeriodEnd = new Date(nextBillingDate)
+  currentPeriodEnd.setDate(currentPeriodEnd.getDate() - 1)
+
+  const todayStr = today.toISOString().split('T')[0]
+  const nextBillingStr = nextBillingDate.toISOString().split('T')[0]
+  const periodEndStr = currentPeriodEnd.toISOString().split('T')[0]
+
+  const updateData = {
+    billing_cycle: 'yearly',
+    next_billing_date: nextBillingStr,
+    current_period_start: todayStr,
+    current_period_end: periodEndStr,
+    subscription_start_date: todayStr,
+    subscription_end_date: nextBillingStr,
+    updated_at: new Date().toISOString(),
+  }
+
+  // 로컬 fallback (localTenantStore)
+  const localFallback = () => {
+    const idx = localTenantStore.findIndex(t => t.id === tenantId)
+    if (idx !== -1) {
+      Object.assign(localTenantStore[idx], updateData)
+    }
+    return c.json({
+      success: true,
+      message: '연간 결제로 전환되었습니다.',
+      data: {
+        tenant_id: tenantId,
+        billing_cycle: 'yearly',
+        next_billing_date: nextBillingStr,
+        current_period_end: periodEndStr,
+      },
+    })
+  }
+
+  if (!isSupabaseConfigured(c.env)) return localFallback()
+
+  const supabase = createSupabaseAdmin(c.env)
+  try {
+    const { error } = await supabase
+      .from('tenants')
+      .update(updateData)
+      .eq('id', tenantId)
+      .eq('is_deleted', false)
+
+    if (error) {
+      if (isNetworkOrInternalError(error.message)) return localFallback()
+      return c.json({ success: false, error: error.message }, 500)
+    }
+
+    return c.json({
+      success: true,
+      message: '연간 결제로 전환되었습니다.',
+      data: {
+        tenant_id: tenantId,
+        billing_cycle: 'yearly',
+        next_billing_date: nextBillingStr,
+        current_period_end: periodEndStr,
+      },
+    })
+  } catch {
+    return localFallback()
+  }
 })
 
 export default superRouter

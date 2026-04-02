@@ -839,7 +839,7 @@ function ChangePasswordModal({ onClose, onLogout }: {
 // ════════════════════════════════════════════════════════
 // 관리 드롭다운 메뉴 (position:fixed — 테이블 overflow 잘림 방지)
 // ════════════════════════════════════════════════════════
-function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete, onExtend, onConfirmPayment }: {
+function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete, onExtend, onConfirmPayment, onYearlyBilling }: {
   tenant: Tenant
   onPlan: () => void
   onStatus: () => void
@@ -847,6 +847,7 @@ function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete, onExtend, o
   onDelete: () => void
   onExtend: () => void
   onConfirmPayment: () => void
+  onYearlyBilling: () => void
 }) {
   const [open, setOpen] = useState(false)
   // fixed 위치 좌표 (버튼 bottom 기준)
@@ -917,6 +918,13 @@ function ActionMenu({ tenant, onPlan, onStatus, onResetPw, onDelete, onExtend, o
       bg: 'rgba(5,150,105,0.06)',
       hoverBg: 'rgba(5,150,105,0.12)',
       onClick: () => { setOpen(false); onConfirmPayment() },
+    },
+    {
+      label: '연간 결제 전환',
+      color: '#0284C7',
+      bg: 'rgba(2,132,199,0.06)',
+      hoverBg: 'rgba(2,132,199,0.12)',
+      onClick: () => { setOpen(false); onYearlyBilling() },
     },
     {
       label: '비밀번호 초기화',
@@ -1056,6 +1064,78 @@ function ExtendModal({ tenant, onClose, onSuccess }: {
   )
 }
 
+// [모달5-b] 연간 결제 전환 확인 모달
+function YearlyBillingModal({ tenant, onClose, onSuccess }: {
+  tenant: Tenant; onClose: () => void; onSuccess: (msg: string) => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  // 오늘 + 1년 날짜 계산 (표시용)
+  const today = new Date()
+  const nextYear = new Date(today)
+  nextYear.setFullYear(nextYear.getFullYear() + 1)
+  const nextBillingStr = nextYear.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+
+  async function handleConvert() {
+    setLoading(true); setErr('')
+    try {
+      await superApi.convertToYearlyBilling(tenant.id)
+      onSuccess('연간 결제로 전환되었습니다.')
+      onClose()
+    } catch (e: any) { setErr(e.message) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <ModalWrap onClose={onClose} maxWidth={440}>
+      <ModalHeader title="연간 결제 전환" onClose={onClose} />
+      <div style={{ padding: '20px 24px 24px' }}>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '16px' }}>
+          <div style={{
+            width: '44px', height: '44px', borderRadius: '50%',
+            background: 'rgba(2,132,199,0.12)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>
+            <span style={{ fontSize: '20px' }}>📅</span>
+          </div>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: '14px', color: 'var(--text-primary)', margin: '0 0 8px', lineHeight: 1.6 }}>
+              <strong>{tenant.company_name}</strong>을(를) 연간 결제로 전환합니다.
+            </p>
+            <div style={{
+              background: 'rgba(2,132,199,0.06)',
+              border: '1px solid rgba(2,132,199,0.2)',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              fontSize: '13px',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.7,
+            }}>
+              <div>• <strong style={{ color: 'var(--text-primary)' }}>다음 결제일</strong>: {nextBillingStr}</div>
+              <div>• <strong style={{ color: 'var(--text-primary)' }}>구독 기간</strong>: 오늘부터 1년</div>
+              <div style={{ marginTop: '6px', fontSize: '12px', color: '#D97706' }}>
+                ⚠️ 전환 후 되돌릴 수 없습니다.
+              </div>
+            </div>
+          </div>
+        </div>
+        <ErrBox msg={err} />
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={onClose} disabled={loading} style={{ ...S.btnSecondary, flex: 1 }}>취소</button>
+          <button
+            onClick={handleConvert}
+            disabled={loading}
+            style={{ ...S.btnPrimary, flex: 1, background: '#0284C7', opacity: loading ? 0.8 : 1 }}
+          >
+            {loading ? <><Spinner /> 전환 중...</> : '연간 결제 전환'}
+          </button>
+        </div>
+      </div>
+    </ModalWrap>
+  )
+}
+
 // [모달6] 입금 확인 모달
 function ConfirmPaymentModal({ tenant, onClose, onSuccess }: {
   tenant: Tenant; onClose: () => void; onSuccess: (msg: string) => void
@@ -1116,6 +1196,7 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
   const [deleteModal, setDeleteModal] = useState<Tenant | null>(null)
   const [extendModal, setExtendModal] = useState<Tenant | null>(null)
   const [confirmPayModal, setConfirmPayModal] = useState<Tenant | null>(null)
+  const [yearlyBillingModal, setYearlyBillingModal] = useState<Tenant | null>(null)
 
   const loadTenants = useCallback(async (p = 1, s = '', plan = '', status = '') => {
     setLoading(true)
@@ -1370,6 +1451,7 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
                           onDelete={() => setDeleteModal(tenant)}
                           onExtend={() => setExtendModal(tenant)}
                           onConfirmPayment={() => setConfirmPayModal(tenant)}
+                          onYearlyBilling={() => setYearlyBillingModal(tenant)}
                         />
                       </td>
                     </tr>
@@ -1466,6 +1548,13 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
           tenant={confirmPayModal}
           onClose={() => setConfirmPayModal(null)}
           onSuccess={msg => { onShowToast(msg, 'success'); loadTenants(page, search, planFilter, statusFilter); setConfirmPayModal(null) }}
+        />
+      )}
+      {yearlyBillingModal && (
+        <YearlyBillingModal
+          tenant={yearlyBillingModal}
+          onClose={() => setYearlyBillingModal(null)}
+          onSuccess={msg => { onShowToast(msg, 'success'); loadTenants(page, search, planFilter, statusFilter); setYearlyBillingModal(null) }}
         />
       )}
     </div>

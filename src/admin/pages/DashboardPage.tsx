@@ -140,6 +140,7 @@ function SubscriptionCard({ tenantPlan }: { tenantPlan: string }) {
   const [sub, setSub] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
+  const [showAccount, setShowAccount] = useState(false);
   const [payModalOpen, setPayModalOpen] = useState(false)
   const [payMemo, setPayMemo] = useState('')
   const [payLoading, setPayLoading] = useState(false)
@@ -291,15 +292,51 @@ function SubscriptionCard({ tenantPlan }: { tenantPlan: string }) {
               <div style={{ flex: 1, minWidth: '200px' }}>
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{sub.payment_settings.bank_name}</span>
                 <span style={{ fontSize: '14px', color: 'var(--text-secondary)', marginLeft: '8px' }}>{sub.payment_settings.account_number}</span>
-                <span style={{ fontSize: '13px', color: 'var(--text-secondary)', marginLeft: '6px' }}>({sub.payment_settings.account_holder})</span>
-              </div>
-              <button onClick={copyAccount} style={{ background: copied ? '#059669' : 'var(--primary)', color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'inherit', flexShrink: 0 }}>
-                {copied ? <><Check size={12}/>복사됨</> : <><Copy size={12}/>복사</>}
-              </button>
-            </div>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#4F46E5', marginBottom: '6px' }}>
-              입금 금액: ₩{(PLAN_PRICE[plan] || 99000).toLocaleString()}
-            </div>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)', marginLeft: '6px' }}>
+  {sub.payment_settings.account_holder}</span>
+</div>
+
+{/* 토글 버튼 */}
+<button
+  onClick={() => setShowAccount(prev => !prev)}
+  style={{
+    background: showAccount ? '#6B7280' : 'var(--primary)',
+    color: '#fff', border: 'none', borderRadius: '6px',
+    padding: '5px 10px', cursor: 'pointer', fontSize: '12px',
+    fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px',
+    fontFamily: 'inherit', flexShrink: 0
+  }}
+>
+  {showAccount ? '닫기 ▲' : '입금하기 ▼'}
+</button>
+</div>
+
+{/* 계좌번호 + 복사 + 금액 - 버튼 클릭시만 표시 */}
+{showAccount && (
+  <div style={{
+    marginTop: '8px', padding: '10px 12px',
+    background: '#F0F9FF', border: '1px solid #BAE6FD',
+    borderRadius: '8px',
+  }}>
+    <div style={{ fontSize: '12px', fontWeight: 600, color: '#4F46E5', marginBottom: '6px' }}>
+      입금 금액: ₩{(PLAN_PRICE[plan] || 99000).toLocaleString()}
+    </div>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+      <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+        {sub.payment_settings.account_number}
+      </span>
+      <button onClick={copyAccount} style={{
+        background: copied ? '#059669' : 'var(--primary)',
+        color: '#fff', border: 'none', borderRadius: '6px',
+        padding: '5px 10px', cursor: 'pointer', fontSize: '12px',
+        fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px',
+        fontFamily: 'inherit', flexShrink: 0
+      }}>
+        {copied ? <><Check size={12}/>복사됨</> : <><Copy size={12}/>복사</>}
+      </button>
+    </div>
+  </div>
+)}
             {sub.payment_settings.payment_guide && (
               <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 10px', lineHeight: 1.5 }}>{sub.payment_settings.payment_guide}</p>
             )}

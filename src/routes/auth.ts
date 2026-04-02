@@ -109,6 +109,11 @@ auth.post('/super/login', async (c) => {
     return c.json({ success: false, error: '이메일과 비밀번호를 입력하세요.' }, 400)
   }
 
+  // 비밀번호 72자 제한 (bcrypt 안전 범위)
+  if (password.length > 72) {
+    return c.json({ success: false, error: '비밀번호는 최대 72자까지 입력 가능합니다.' }, 400)
+  }
+
   // ── JWT 시크릿 확인 ──────────────────────────────
   const jwtSecret = c.env.SUPER_JWT_SECRET || ''
   const hasJwtSecret = jwtSecret.length >= 16 && !jwtSecret.includes('your_super')
@@ -270,6 +275,11 @@ auth.post('/admin/login', async (c) => {
 
   if (!email || !password) {
     return c.json({ success: false, error: '이메일과 비밀번호를 입력하세요.' }, 400)
+  }
+
+  // 비밀번호 72자 제한 (bcrypt 안전 범위)
+  if (password.length > 72) {
+    return c.json({ success: false, error: '비밀번호는 최대 72자까지 입력 가능합니다.' }, 400)
   }
 
   // ── JWT 시크릿 결정 ──────────────────────────────

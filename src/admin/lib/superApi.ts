@@ -61,6 +61,8 @@ export const superApi = {
     superRequest<any>('POST', `/tenants/${id}/extend`),
   confirmTenantPayment: (id: string) =>
     superRequest<any>('POST', `/tenants/${id}/confirm-payment`),
+  convertToYearlyBilling: (id: string) =>
+    superRequest<any>('PUT', `/tenants/${id}/billing`, { billing_cycle: 'yearly' }),
   checkExpired: () =>
     superRequest<any>('GET', '/check-expired'),
 
