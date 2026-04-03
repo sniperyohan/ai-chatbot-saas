@@ -466,6 +466,7 @@ superRouter.get('/tenants', async (c) => {
     return result
   }
 
+  // Supabase 미설정 시 로컬 메모리 fallback
   if (!isSupabaseConfigured(c.env)) {
     const active = filterLocalItems(localTenantStore)
     const sliced = active.slice(offset, offset + limit)
@@ -475,11 +476,12 @@ superRouter.get('/tenants', async (c) => {
     })
   }
 
+  // Supabase 설정됨 → 반드시 Supabase 사용, 로컬 fallback 없음
   const supabase = createSupabaseAdmin(c.env)
   try {
     let query = supabase
       .from('tenants')
-      .select('id, company_name, email, plan, is_active, is_deleted, created_at, widget_color, bot_name', { count: 'exact' })
+      .select('id, company_name, email, plan, is_active, is_deleted, created_at, widget_color, bot_name, subscription_start_date, subscription_end_date, subscription_status', { count: 'exact' })
       .eq('is_deleted', false)
       .order('created_at', { ascending: false })
 
@@ -490,32 +492,18 @@ superRouter.get('/tenants', async (c) => {
 
     const { data, count, error } = await query.range(offset, offset + limit - 1)
 
-    if (error && isNetworkOrInternalError(error.message)) {
-      const active = filterLocalItems(localTenantStore)
-      const sliced = active.slice(offset, offset + limit)
-      return c.json({
-        success: true,
-        data: { items: sliced, total: active.length, page, limit, totalPages: Math.ceil(active.length / limit) },
-      })
+    if (error) {
+      console.error('[super/tenants GET] Supabase 오류:', error.message)
+      return c.json({ success: false, error: `고객사 목록 조회 실패: ${error.message}` }, 500)
     }
-    if (error) return c.json({ success: false, error: error.message }, 500)
-
-    const localItems = filterLocalItems(localTenantStore)
-    const allItems = page === 1 ? [...localItems, ...(data || [])] : (data || [])
-    const totalCount = (count || 0) + localItems.length
 
     return c.json({
       success: true,
-      data: { items: allItems, total: totalCount, page, limit, totalPages: Math.ceil(totalCount / limit) },
+      data: { items: data || [], total: count || 0, page, limit, totalPages: Math.ceil((count || 0) / limit) },
     })
   } catch (err: any) {
-    console.warn('[super/tenants] Supabase 예외, 로컬 fallback:', err.message)
-    const active = filterLocalItems(localTenantStore)
-    const sliced = active.slice(offset, offset + limit)
-    return c.json({
-      success: true,
-      data: { items: sliced, total: active.length, page, limit, totalPages: Math.ceil(active.length / limit) },
-    })
+    console.error('[super/tenants GET] Supabase 예외:', err.message)
+    return c.json({ success: false, error: `서버 오류: ${err.message}` }, 500)
   }
 })
 
@@ -570,17 +558,30 @@ superRouter.post('/tenants', async (c) => {
     }, 201)
   }
 
+  // Supabase 미설정 시 로컬 메모리 fallback
   if (!isSupabaseConfigured(c.env)) return createLocalTenant()
 
+  // Supabase 설정됨 → 반드시 Supabase 사용, 로컬 fallback 없음
   const supabase = createSupabaseAdmin(c.env)
   try {
+    // 중복 이메일 확인 (tenants + admins)
     const [{ data: existTenant, error: e1 }, { data: existAdmin, error: e2 }] = await Promise.all([
-      supabase.from('tenants').select('id').eq('email', normalizedEmail).single(),
-      supabase.from('admins').select('id').eq('email', normalizedEmail).single(),
+      supabase.from('tenants').select('id').eq('email', normalizedEmail).eq('is_deleted', false).maybeSingle(),
+      supabase.from('admins').select('id').eq('email', normalizedEmail).maybeSingle(),
     ])
 
-    if (isNetworkOrInternalError((e1?.message || '') + (e2?.message || ''))) return createLocalTenant()
-    if (existTenant || existAdmin) return c.json({ success: false, error: '이미 사용 중인 이메일입니다.' }, 409)
+    if (e1 && !e1.message.includes('PGRST116')) {
+      console.error('[super/tenants POST] tenants 중복 확인 오류:', e1.message)
+      return c.json({ success: false, error: `이메일 중복 확인 실패: ${e1.message}` }, 500)
+    }
+    if (e2 && !e2.message.includes('PGRST116')) {
+      console.error('[super/tenants POST] admins 중복 확인 오류:', e2.message)
+      return c.json({ success: false, error: `이메일 중복 확인 실패: ${e2.message}` }, 500)
+    }
+
+    if (existTenant || existAdmin) {
+      return c.json({ success: false, error: '이미 사용 중인 이메일입니다.' }, 409)
+    }
 
     const tempPassword = generateTempPassword()
     const hashedPassword = await bcrypt.hash(tempPassword, SALT_ROUNDS)
@@ -600,8 +601,8 @@ superRouter.post('/tenants', async (c) => {
       .single()
 
     if (insertError) {
-      if (isNetworkOrInternalError(insertError.message)) return createLocalTenant()
-      return c.json({ success: false, error: insertError.message }, 500)
+      console.error('[super/tenants POST] 고객사 생성 오류:', insertError.message)
+      return c.json({ success: false, error: `고객사 생성 실패: ${insertError.message}` }, 500)
     }
 
     await supabase.from('plan_history').insert({ tenant_id: newTenant.id, old_plan: 'none', new_plan: plan })
@@ -619,8 +620,8 @@ superRouter.post('/tenants', async (c) => {
       message: emailSent ? '고객사가 생성되고 이메일이 발송되었습니다.' : '고객사가 생성되었으나 이메일 발송에 실패했습니다.',
     }, 201)
   } catch (err: any) {
-    console.warn('[super/tenants] Supabase 예외, 로컬 fallback:', err.message)
-    return createLocalTenant()
+    console.error('[super/tenants POST] Supabase 예외:', err.message)
+    return c.json({ success: false, error: `서버 오류: ${err.message}` }, 500)
   }
 })
 
