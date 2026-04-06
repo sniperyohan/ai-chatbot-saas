@@ -6,7 +6,7 @@
 // =====================================================
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
-import { createSupabaseAdmin } from '../lib/supabase'
+import { createSupabaseAdmin, retrySupabase } from '../lib/supabase'
 import { signJwt } from '../lib/jwt'
 import { adminAuthMiddleware } from '../middleware/auth'
 import { Bindings, Variables } from '../types'
@@ -132,75 +132,55 @@ auth.post('/super/login', async (c) => {
     console.log('[DEBUG][super/login] Supabase 연결 모드 시도')
     const supabase = createSupabaseAdmin(c.env)
 
-    let admin: { id: string; email: string; password: string } | null = null
-    let dbError: { message: string } | null = null
-    let isNetworkError = false
-
-    try {
-      const result = await supabase
+    const { data: adminData, error: adminErr } = await retrySupabase(() =>
+      supabase
         .from('admins')
         .select('id, email, password')
         .eq('email', email)
         .single()
-      admin   = result.data
-      dbError = result.error
-    } catch (fetchErr: any) {
-      // DNS 실패 / 네트워크 오류 → 로컬 fallback으로 전환
-      console.warn('[DEBUG][super/login] ⚠️ Supabase 네트워크 오류, 로컬 fallback으로 전환:', fetchErr.message)
-      isNetworkError = true
+    )
+
+    const errMsg = adminErr?.message ?? ''
+    console.log('[DEBUG][super/login] DB 조회 결과:', {
+      found: !!adminData,
+      dbError: errMsg || null,
+    })
+
+    if (adminErr || !adminData) {
+      // 네트워크/재시도 소진 에러
+      if (errMsg.includes('error code: 1016') || errMsg.includes('internal error') ||
+          errMsg.includes('DNS') || errMsg.includes('fetch failed') ||
+          errMsg.includes('Failed to fetch') || errMsg.includes('network') ||
+          errMsg.includes('ENOTFOUND') || errMsg.includes('name or service not known') ||
+          errMsg.includes('upstream connect error') || errMsg.includes('connection reset') ||
+          errMsg.includes('socket hang up') || errMsg.includes('etimedout')) {
+        console.error('[DEBUG][super/login] ❌ Supabase 연결 실패 (재시도 소진):', errMsg)
+        return c.json({ success: false, error: 'Supabase 연결 실패. 잠시 후 다시 시도하세요.' }, 503)
+      }
+      return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
     }
 
-    // Supabase 클라이언트가 네트워크/DNS 오류를 internal error로 반환하는 경우도 감지
-    const errMsg = dbError?.message ?? ''
-    if (!isNetworkError && (
-      errMsg.includes('internal error') ||
-      errMsg.includes('DNS') ||
-      errMsg.includes('fetch failed') ||
-      errMsg.includes('Failed to fetch') ||
-      errMsg.includes('network') ||
-      errMsg.includes('error code: 1016') ||  // 테이블 없음 → fallback
-      errMsg.includes('relation') ||           // relation does not exist
-      errMsg.includes('does not exist')        // table does not exist
-    )) {
-      console.warn('[DEBUG][super/login] ⚠️ Supabase 오류 감지, 로컬 fallback으로 전환:', errMsg)
-      isNetworkError = true
+    const admin = adminData as { id: string; email: string; password: string }
+    let isValid = false
+    try {
+      isValid = await bcrypt.compare(password, admin.password)
+    } catch (e: any) {
+      console.error('[DEBUG][super/login] bcrypt 오류:', e.message)
+      return c.json({ success: false, error: '비밀번호 검증 중 오류가 발생했습니다.' }, 500)
     }
 
-    // 네트워크 오류가 없는 정상 DB 응답 처리
-    if (!isNetworkError) {
-      console.log('[DEBUG][super/login] DB 조회 결과:', {
-        found: !!admin,
-        dbError: errMsg || null,
-        adminEmail: admin?.email ?? null,
-        passwordHashPrefix: admin?.password?.substring(0, 7) ?? null,
-      })
+    console.log('[DEBUG][super/login] bcrypt.compare 결과 (DB):', isValid)
 
-      if (dbError || !admin) {
-        return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-      }
-
-      let isValid = false
-      try {
-        isValid = await bcrypt.compare(password, admin.password)
-      } catch (e: any) {
-        console.error('[DEBUG][super/login] bcrypt 오류:', e.message)
-        return c.json({ success: false, error: '비밀번호 검증 중 오류가 발생했습니다.' }, 500)
-      }
-
-      console.log('[DEBUG][super/login] bcrypt.compare 결과 (DB):', isValid)
-
-      if (!isValid) {
-        return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-      }
-
-      const token = await signJwt(
-        { sub: admin.id, email: admin.email, role: 'super_admin' },
-        effectiveSecret
-      )
-      console.log('[DEBUG][super/login] ✅ 로그인 성공 (DB):', admin.email)
-      return c.json({ success: true, data: { token, admin: { id: admin.id, email: admin.email } } })
+    if (!isValid) {
+      return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
     }
-    // isNetworkError === true → 아래 CASE B(로컬 fallback)로 낙하
+
+    const token = await signJwt(
+      { sub: admin.id, email: admin.email, role: 'super_admin' },
+      effectiveSecret
+    )
+    console.log('[DEBUG][super/login] ✅ 로그인 성공 (DB):', admin.email)
+    return c.json({ success: true, data: { token, admin: { id: admin.id, email: admin.email } } })
   }
 
   // ════════════════════════════════════════════════
@@ -297,133 +277,114 @@ auth.post('/admin/login', async (c) => {
     console.log('[DEBUG][admin/login] Supabase 연결 모드 시도')
     const supabase = createSupabaseAdmin(c.env)
 
-    let tenant: any = null
-    let dbError: { message: string } | null = null
-    let isNetworkError = false
-
-    try {
-      const result = await supabase
+    const { data: tenantData, error: tenantErr } = await retrySupabase(() =>
+      supabase
         .from('tenants')
         .select('*')
         .eq('email', email)
         .eq('is_deleted', false)
         .single()
-      tenant  = result.data
-      dbError = result.error
-    } catch (fetchErr: any) {
-      console.warn('[DEBUG][admin/login] ⚠️ Supabase 네트워크 오류, 로컬 fallback으로 전환:', fetchErr.message)
-      isNetworkError = true
+    )
+
+    const errMsg = tenantErr?.message ?? ''
+    console.log('[DEBUG][admin/login] DB 조회 결과:', { found: !!tenantData, dbError: errMsg || null })
+
+    // 네트워크/연결 오류 (재시도 소진) → 명확한 에러 반환 (로컬 fallback 없음)
+    if (errMsg.includes('error code: 1016') || errMsg.includes('internal error') ||
+        errMsg.includes('DNS') || errMsg.includes('fetch failed') ||
+        errMsg.includes('Failed to fetch') || errMsg.includes('network') ||
+        errMsg.includes('ENOTFOUND') || errMsg.includes('name or service not known') ||
+        errMsg.includes('upstream connect error') || errMsg.includes('connection reset') ||
+        errMsg.includes('socket hang up') || errMsg.includes('etimedout')) {
+      console.error('[DEBUG][admin/login] ❌ Supabase 연결 실패 (재시도 소진):', errMsg)
+      return c.json({ success: false, error: 'Supabase 연결 실패. 잠시 후 다시 시도하세요.' }, 503)
     }
 
-    const errMsg = dbError?.message ?? ''
-    if (!isNetworkError && (
-      errMsg.includes('internal error') ||
-      errMsg.includes('DNS') ||
-      errMsg.includes('fetch failed') ||
-      errMsg.includes('Failed to fetch') ||
-      errMsg.includes('network') ||
-      errMsg.includes('ENOTFOUND') ||
-      errMsg.includes('error code: 1016') ||
-      errMsg.includes('relation') ||
-      errMsg.includes('does not exist')
-    )) {
-      console.warn('[DEBUG][admin/login] ⚠️ Supabase 오류 감지, 로컬 fallback으로 전환:', errMsg)
-      isNetworkError = true
+    // 행이 없는 경우 → 로그인 실패 (로컬 fallback 없음)
+    if (!tenantData) {
+      return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
     }
 
-    if (!isNetworkError) {
-      // tenant가 없는 경우 → 로컬 테스트 계정 fallback 시도
-      if (dbError || !tenant) {
-        // PGRST116: no rows found → 테스트 계정 fallback 허용
-        const notFoundErr = dbError?.message?.includes('PGRST116') || dbError?.message?.includes('no rows') || dbError?.message?.includes('JSON object requested') || !tenant
-        if (notFoundErr) {
-          console.log('[DEBUG][admin/login] DB에 없음, 테스트 계정 fallback 시도:', email)
-          isNetworkError = true
-        } else {
-          return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-        }
-      }
+    const tenant = tenantData
+
+    // 계정 활성화 확인
+    if (!tenant.is_active) {
+      return c.json({ success: false, error: '비활성화된 계정입니다. 관리자에게 문의하세요.' }, 403)
     }
 
-    if (!isNetworkError && tenant) {
-
-      // 계정 활성화 확인
-      if (!tenant.is_active) {
-        return c.json({ success: false, error: '비활성화된 계정입니다. 관리자에게 문의하세요.' }, 403)
-      }
-
-      // 잠금 확인
-      if (tenant.login_locked_until) {
-        const lockedUntil = new Date(tenant.login_locked_until).getTime()
-        if (Date.now() < lockedUntil) {
-          const remainSec = Math.ceil((lockedUntil - Date.now()) / 1000)
-          return c.json({
-            success: false,
-            error: `로그인이 잠겼습니다. ${remainSec}초 후 다시 시도하세요.`,
-          }, 423)
-        }
-      }
-
-      // 비밀번호 검증
-      const isValid = await bcrypt.compare(password, tenant.password)
-
-      if (!isValid) {
-        const newFailCount = (tenant.login_fail_count || 0) + 1
-        const updateData: Record<string, unknown> = { login_fail_count: newFailCount }
-
-        if (newFailCount >= MAX_FAIL) {
-          updateData.login_locked_until = new Date(Date.now() + LOCK_DURATION_MS).toISOString()
-          updateData.login_fail_count = 0
-          await supabase.from('tenants').update(updateData).eq('id', tenant.id)
-          return c.json({
-            success: false,
-            error: `비밀번호 ${MAX_FAIL}회 오류로 5분간 잠겼습니다.`,
-          }, 423)
-        }
-
-        await supabase.from('tenants').update(updateData).eq('id', tenant.id)
+    // 잠금 확인
+    if (tenant.login_locked_until) {
+      const lockedUntil = new Date(tenant.login_locked_until).getTime()
+      if (Date.now() < lockedUntil) {
+        const remainSec = Math.ceil((lockedUntil - Date.now()) / 1000)
         return c.json({
           success: false,
-          error: `비밀번호가 올바르지 않습니다. (${newFailCount}/${MAX_FAIL})`,
-        }, 401)
+          error: `로그인이 잠겼습니다. ${remainSec}초 후 다시 시도하세요.`,
+        }, 423)
+      }
+    }
+
+    // 비밀번호 검증
+    const isValid = await bcrypt.compare(password, tenant.password)
+
+    if (!isValid) {
+      const newFailCount = (tenant.login_fail_count || 0) + 1
+      const updateData: Record<string, unknown> = { login_fail_count: newFailCount }
+
+      if (newFailCount >= MAX_FAIL) {
+        updateData.login_locked_until = new Date(Date.now() + LOCK_DURATION_MS).toISOString()
+        updateData.login_fail_count = 0
+        await retrySupabase(() => supabase.from('tenants').update(updateData).eq('id', tenant.id))
+        return c.json({
+          success: false,
+          error: `비밀번호 ${MAX_FAIL}회 오류로 5분간 잠겼습니다.`,
+        }, 423)
       }
 
-      // 로그인 성공 → 실패 카운트 초기화
-      await supabase
+      await retrySupabase(() => supabase.from('tenants').update(updateData).eq('id', tenant.id))
+      return c.json({
+        success: false,
+        error: `비밀번호가 올바르지 않습니다. (${newFailCount}/${MAX_FAIL})`,
+      }, 401)
+    }
+
+    // 로그인 성공 → 실패 카운트 초기화
+    await retrySupabase(() =>
+      supabase
         .from('tenants')
         .update({ login_fail_count: 0, login_locked_until: null })
         .eq('id', tenant.id)
+    )
 
-      const token = await signJwt(
-        { sub: tenant.id, email: tenant.email, role: 'tenant_admin' },
-        effectiveAdminSecret
-      )
+    const token = await signJwt(
+      { sub: tenant.id, email: tenant.email, role: 'tenant_admin' },
+      effectiveAdminSecret
+    )
 
-      console.log('[DEBUG][admin/login] ✅ 로그인 성공 (DB):', tenant.email)
-      return c.json({
-        success: true,
-        data: {
-          token,
-          tenant: {
-            id: tenant.id,
-            company_name: tenant.company_name,
-            email: tenant.email,
-            plan: tenant.plan,
-            bot_name: tenant.bot_name,
-            widget_color: tenant.widget_color,
-            greeting_message: tenant.greeting_message,
-            is_temp_password: tenant.is_temp_password || false,
-            billing_day: tenant.billing_day || 1,
-            subscribed_at: tenant.subscribed_at || null,
-          },
+    console.log('[DEBUG][admin/login] ✅ 로그인 성공 (DB):', tenant.email)
+    return c.json({
+      success: true,
+      data: {
+        token,
+        tenant: {
+          id: tenant.id,
+          company_name: tenant.company_name,
+          email: tenant.email,
+          plan: tenant.plan,
+          bot_name: tenant.bot_name,
+          widget_color: tenant.widget_color,
+          greeting_message: tenant.greeting_message,
+          is_temp_password: tenant.is_temp_password || false,
+          billing_day: tenant.billing_day || 1,
+          subscribed_at: tenant.subscribed_at || null,
         },
-      })
-    }
-    // isNetworkError → 로컬 테스트 계정 fallback
+      },
+    })
   }
 
   // ════════════════════════════════════════════════
-  // CASE B: Supabase 미설정 or 오류 → 로컬 테스트 계정 fallback
+  // CASE B: Supabase 미설정 → 로컬 테스트 계정 fallback
+  // (Supabase가 설정된 경우에는 여기까지 오지 않음)
   // ════════════════════════════════════════════════
   console.log('[DEBUG][admin/login] 로컬 테스트 계정 fallback 시도:', email)
 
@@ -436,7 +397,6 @@ auth.post('/admin/login', async (c) => {
   // 비밀번호 검증 (Test1234! 직접 비교 + bcrypt 비교)
   let isLocalValid = false
   try {
-    // 먼저 직접 비교 (Test1234!)
     if (password === 'Test1234!') {
       isLocalValid = true
     } else {
@@ -444,7 +404,6 @@ auth.post('/admin/login', async (c) => {
     }
   } catch (e: any) {
     console.error('[DEBUG][admin/login] bcrypt 오류 (local):', e.message)
-    // bcrypt 실패 시 직접 비교로 fallback
     isLocalValid = (password === 'Test1234!')
   }
 
@@ -524,34 +483,27 @@ auth.put('/admin/password', adminAuthMiddleware, async (c) => {
 
   const supabase = createSupabaseAdmin(c.env)
 
-  let tenant: { password: string } | null = null
-  let dbErr: any = null
-  let isNetworkError = false
-
-  try {
-    const result = await supabase
+  const { data: tenantPw, error: pwErr } = await retrySupabase(() =>
+    supabase
       .from('tenants')
       .select('password')
       .eq('id', tenantId)
       .single()
-    tenant = result.data
-    dbErr  = result.error
-  } catch {
-    isNetworkError = true
+  )
+
+  const errMsg2 = pwErr?.message ?? ''
+  if (errMsg2.includes('error code: 1016') || errMsg2.includes('internal error') ||
+      errMsg2.includes('fetch failed') || errMsg2.includes('DNS') ||
+      errMsg2.includes('network') || errMsg2.includes('name or service not known')) {
+    console.error('[DEBUG][admin/password] ❌ Supabase 연결 실패:', errMsg2)
+    return c.json({ success: false, error: 'Supabase 연결 실패. 잠시 후 다시 시도하세요.' }, 503)
   }
 
-  const errMsg2 = dbErr?.message ?? ''
-  if (!isNetworkError && (
-    errMsg2.includes('internal error') || errMsg2.includes('fetch failed') ||
-    errMsg2.includes('error code: 1016') || errMsg2.includes('does not exist')
-  )) {
-    isNetworkError = true
-  }
-
-  if (isNetworkError || dbErr || !tenant) {
-    if (isNetworkError) return c.json({ success: true, message: '비밀번호가 성공적으로 변경되었습니다.' })
+  if (!tenantPw || pwErr) {
     return c.json({ success: false, error: '사용자를 찾을 수 없습니다.' }, 404)
   }
+
+  const tenant = tenantPw as { password: string }
 
   // 현재 비밀번호 검증
   const isCurrentValid = await bcrypt.compare(current_password, tenant.password)
@@ -567,8 +519,8 @@ auth.put('/admin/password', adminAuthMiddleware, async (c) => {
 
   const hashed = await bcrypt.hash(new_password, SALT_ROUNDS)
 
-  try {
-    await supabase
+  await retrySupabase(() =>
+    supabase
       .from('tenants')
       .update({
         password: hashed,
@@ -576,7 +528,7 @@ auth.put('/admin/password', adminAuthMiddleware, async (c) => {
         password_changed_at: new Date().toISOString(),
       })
       .eq('id', tenantId)
-  } catch { /* 저장 실패해도 성공 응답 */ }
+  )
 
   return c.json({ success: true, message: '비밀번호가 성공적으로 변경되었습니다.' })
 })
