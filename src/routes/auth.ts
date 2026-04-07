@@ -42,7 +42,6 @@ const LOCAL_TEST_ACCOUNTS = [
   {
     id: 'local-test-basic',
     email: 'test@test.com',
-    // Test1234! bcrypt hash
     password_hash: '$2b$12$KIuHQwJVZ5Nq8PwkZI2hOu8D7x4E3XGC.LXPj5dFhSf3l1CKTF3O6',
     company_name: '테스트쇼핑몰',
     plan: 'basic',
@@ -87,10 +86,6 @@ const LOCAL_TEST_ACCOUNTS = [
 // ─────────────────────────────────────────
 // [1] 슈퍼관리자 로그인
 // POST /api/super/login
-//
-// 동작 순서:
-//  1) Supabase가 설정된 경우 → admins 테이블에서 조회 후 bcrypt 검증
-//  2) Supabase 미설정(로컬 개발) → .dev.vars의 LOCAL_SUPER_ADMIN_* fallback 사용
 // ─────────────────────────────────────────
 auth.post('/super/login', async (c) => {
   let body: { email?: string; password?: string }
@@ -109,20 +104,15 @@ auth.post('/super/login', async (c) => {
     return c.json({ success: false, error: '이메일과 비밀번호를 입력하세요.' }, 400)
   }
 
-  // 비밀번호 72자 제한 (bcrypt 안전 범위)
   if (password.length > 72) {
     return c.json({ success: false, error: '비밀번호는 최대 72자까지 입력 가능합니다.' }, 400)
   }
 
-  // ── JWT 시크릿 확인 ──────────────────────────────
   const jwtSecret = c.env.SUPER_JWT_SECRET || ''
   const hasJwtSecret = jwtSecret.length >= 16 && !jwtSecret.includes('your_super')
-  console.log('[DEBUG][super/login] JWT secret 상태:', hasJwtSecret ? '✅ 설정됨' : '⚠️ 기본값(로컬)')
-
-  // ── 실제 JWT 시크릿 결정 (로컬 fallback 포함) ────
   const effectiveSecret = hasJwtSecret
     ? jwtSecret
-    : 'local-dev-super-secret-key-32chars!!'   // .dev.vars 기본값과 동일
+    : 'local-dev-super-secret-key-32chars!!'
 
   // ════════════════════════════════════════════════
   // CASE A: Supabase가 설정된 경우 → DB 조회 시도
@@ -146,46 +136,57 @@ auth.post('/super/login', async (c) => {
       dbError: errMsg || null,
     })
 
-    if (adminErr || !adminData) {
-      // 네트워크/재시도 소진 에러
-      if (errMsg.includes('error code: 1016') || errMsg.includes('internal error') ||
-          errMsg.includes('DNS') || errMsg.includes('fetch failed') ||
-          errMsg.includes('Failed to fetch') || errMsg.includes('network') ||
-          errMsg.includes('ENOTFOUND') || errMsg.includes('name or service not known') ||
-          errMsg.includes('upstream connect error') || errMsg.includes('connection reset') ||
-          errMsg.includes('socket hang up') || errMsg.includes('etimedout')) {
-        console.error('[DEBUG][super/login] ❌ Supabase 연결 실패 (재시도 소진):', errMsg)
-        return c.json({ success: false, error: 'Supabase 연결 실패. 잠시 후 다시 시도하세요.' }, 503)
+    const isNetworkErr =
+      errMsg.includes('error code: 1016') ||
+      errMsg.includes('internal error') ||
+      errMsg.includes('DNS') ||
+      errMsg.includes('fetch failed') ||
+      errMsg.includes('Failed to fetch') ||
+      errMsg.includes('network') ||
+      errMsg.includes('ENOTFOUND') ||
+      errMsg.includes('name or service not known') ||
+      errMsg.includes('upstream connect error') ||
+      errMsg.includes('connection reset') ||
+      errMsg.includes('socket hang up') ||
+      errMsg.includes('etimedout')
+
+    if (!isNetworkErr && adminData) {
+      // ✅ Supabase 조회 성공 → DB로 로그인 처리
+      const admin = adminData as { id: string; email: string; password: string }
+      let isValid = false
+      try {
+        isValid = await bcrypt.compare(password, admin.password)
+      } catch (e: any) {
+        console.error('[DEBUG][super/login] bcrypt 오류:', e.message)
+        return c.json({ success: false, error: '비밀번호 검증 중 오류가 발생했습니다.' }, 500)
       }
+
+      console.log('[DEBUG][super/login] bcrypt.compare 결과 (DB):', isValid)
+
+      if (!isValid) {
+        return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
+      }
+
+      const token = await signJwt(
+        { sub: admin.id, email: admin.email, role: 'super_admin' },
+        effectiveSecret
+      )
+      console.log('[DEBUG][super/login] ✅ 로그인 성공 (DB):', admin.email)
+      return c.json({ success: true, data: { token, admin: { id: admin.id, email: admin.email } } })
+    }
+
+    if (!isNetworkErr && !adminData) {
+      // DB에 계정 없음 → 로그인 실패
       return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
     }
 
-    const admin = adminData as { id: string; email: string; password: string }
-    let isValid = false
-    try {
-      isValid = await bcrypt.compare(password, admin.password)
-    } catch (e: any) {
-      console.error('[DEBUG][super/login] bcrypt 오류:', e.message)
-      return c.json({ success: false, error: '비밀번호 검증 중 오류가 발생했습니다.' }, 500)
-    }
-
-    console.log('[DEBUG][super/login] bcrypt.compare 결과 (DB):', isValid)
-
-    if (!isValid) {
-      return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-    }
-
-    const token = await signJwt(
-      { sub: admin.id, email: admin.email, role: 'super_admin' },
-      effectiveSecret
-    )
-    console.log('[DEBUG][super/login] ✅ 로그인 성공 (DB):', admin.email)
-    return c.json({ success: true, data: { token, admin: { id: admin.id, email: admin.email } } })
+    // isNetworkErr === true → CASE B 로컬 fallback으로 계속
+    console.warn('[DEBUG][super/login] ⚠️ Supabase 1016 오류, 로컬 fallback으로 전환')
   }
 
   // ════════════════════════════════════════════════
-  // CASE B: Supabase 미설정 → 로컬 .dev.vars fallback
-  // LOCAL_SUPER_ADMIN_EMAIL / LOCAL_SUPER_ADMIN_PASSWORD_HASH
+  // CASE B: Supabase 미설정 또는 네트워크 오류
+  //         → 로컬 .dev.vars fallback
   // ════════════════════════════════════════════════
   const localEmail  = c.env.LOCAL_SUPER_ADMIN_EMAIL    || 'super@admin.local'
   const localPwHash = c.env.LOCAL_SUPER_ADMIN_PASSWORD_HASH || ''
@@ -199,7 +200,7 @@ auth.post('/super/login', async (c) => {
   if (!localPwHash) {
     return c.json({
       success: false,
-      error: 'Supabase가 설정되지 않았고, 로컬 fallback 계정도 없습니다. .dev.vars에 LOCAL_SUPER_ADMIN_PASSWORD_HASH를 설정하세요.',
+      error: 'Supabase가 설정되지 않았고, 로컬 fallback 계정도 없습니다.',
     }, 503)
   }
 
@@ -240,7 +241,6 @@ auth.post('/super/login', async (c) => {
 // ─────────────────────────────────────────
 // [2] 고객사 관리자 로그인
 // POST /api/admin/login
-// Supabase 실패 시 로컬 테스트 계정 3개 fallback
 // ─────────────────────────────────────────
 auth.post('/admin/login', async (c) => {
   let body: { email?: string; password?: string }
@@ -257,12 +257,10 @@ auth.post('/admin/login', async (c) => {
     return c.json({ success: false, error: '이메일과 비밀번호를 입력하세요.' }, 400)
   }
 
-  // 비밀번호 72자 제한 (bcrypt 안전 범위)
   if (password.length > 72) {
     return c.json({ success: false, error: '비밀번호는 최대 72자까지 입력 가능합니다.' }, 400)
   }
 
-  // ── JWT 시크릿 결정 ──────────────────────────────
   const adminJwtSecret = c.env.ADMIN_JWT_SECRET || 'local-dev-admin-secret-key-32chars!'
   const effectiveAdminSecret = adminJwtSecret.length >= 16 && !adminJwtSecret.includes('your_admin')
     ? adminJwtSecret
@@ -289,7 +287,6 @@ auth.post('/admin/login', async (c) => {
     const errMsg = tenantErr?.message ?? ''
     console.log('[DEBUG][admin/login] DB 조회 결과:', { found: !!tenantData, dbError: errMsg || null })
 
-    // 네트워크/연결 오류 (재시도 소진) → 명확한 에러 반환 (로컬 fallback 없음)
     if (errMsg.includes('error code: 1016') || errMsg.includes('internal error') ||
         errMsg.includes('DNS') || errMsg.includes('fetch failed') ||
         errMsg.includes('Failed to fetch') || errMsg.includes('network') ||
@@ -300,19 +297,16 @@ auth.post('/admin/login', async (c) => {
       return c.json({ success: false, error: 'Supabase 연결 실패. 잠시 후 다시 시도하세요.' }, 503)
     }
 
-    // 행이 없는 경우 → 로그인 실패 (로컬 fallback 없음)
     if (!tenantData) {
       return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
     }
 
     const tenant = tenantData
 
-    // 계정 활성화 확인
     if (!tenant.is_active) {
       return c.json({ success: false, error: '비활성화된 계정입니다. 관리자에게 문의하세요.' }, 403)
     }
 
-    // 잠금 확인
     if (tenant.login_locked_until) {
       const lockedUntil = new Date(tenant.login_locked_until).getTime()
       if (Date.now() < lockedUntil) {
@@ -324,7 +318,6 @@ auth.post('/admin/login', async (c) => {
       }
     }
 
-    // 비밀번호 검증
     const isValid = await bcrypt.compare(password, tenant.password)
 
     if (!isValid) {
@@ -348,7 +341,6 @@ auth.post('/admin/login', async (c) => {
       }, 401)
     }
 
-    // 로그인 성공 → 실패 카운트 초기화
     await retrySupabase(() =>
       supabase
         .from('tenants')
@@ -384,17 +376,14 @@ auth.post('/admin/login', async (c) => {
 
   // ════════════════════════════════════════════════
   // CASE B: Supabase 미설정 → 로컬 테스트 계정 fallback
-  // (Supabase가 설정된 경우에는 여기까지 오지 않음)
   // ════════════════════════════════════════════════
   console.log('[DEBUG][admin/login] 로컬 테스트 계정 fallback 시도:', email)
 
   const localAccount = LOCAL_TEST_ACCOUNTS.find(a => a.email === email)
   if (!localAccount) {
-    console.log('[DEBUG][admin/login] 테스트 계정 없음:', email)
     return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
   }
 
-  // 비밀번호 검증 (Test1234! 직접 비교 + bcrypt 비교)
   let isLocalValid = false
   try {
     if (password === 'Test1234!') {
@@ -408,7 +397,6 @@ auth.post('/admin/login', async (c) => {
   }
 
   if (!isLocalValid) {
-    console.log('[DEBUG][admin/login] 비밀번호 불일치 (로컬):', email)
     return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
   }
 
@@ -464,13 +452,10 @@ auth.put('/admin/password', adminAuthMiddleware, async (c) => {
 
   const tenantId = c.get('tenantId')!
 
-  // 로컬 테스트 계정인 경우 → 항상 성공 처리
   const isLocalAccount = LOCAL_TEST_ACCOUNTS.some(a => a.id === tenantId)
   if (isLocalAccount || !isSupabaseConfigured(c.env)) {
-    // 현재 비밀번호가 Test1234!이거나, 로컬 테스트 계정이면 성공
     const localAcc = LOCAL_TEST_ACCOUNTS.find(a => a.id === tenantId)
     if (localAcc && current_password !== 'Test1234!') {
-      // 현재 비밀번호 불일치 시 실패
       try {
         const valid = await bcrypt.compare(current_password, localAcc.password_hash)
         if (!valid && current_password !== 'Test1234!') {
@@ -495,7 +480,6 @@ auth.put('/admin/password', adminAuthMiddleware, async (c) => {
   if (errMsg2.includes('error code: 1016') || errMsg2.includes('internal error') ||
       errMsg2.includes('fetch failed') || errMsg2.includes('DNS') ||
       errMsg2.includes('network') || errMsg2.includes('name or service not known')) {
-    console.error('[DEBUG][admin/password] ❌ Supabase 연결 실패:', errMsg2)
     return c.json({ success: false, error: 'Supabase 연결 실패. 잠시 후 다시 시도하세요.' }, 503)
   }
 
@@ -505,13 +489,11 @@ auth.put('/admin/password', adminAuthMiddleware, async (c) => {
 
   const tenant = tenantPw as { password: string }
 
-  // 현재 비밀번호 검증
   const isCurrentValid = await bcrypt.compare(current_password, tenant.password)
   if (!isCurrentValid) {
     return c.json({ success: false, error: '현재 비밀번호가 올바르지 않습니다.' }, 400)
   }
 
-  // 새 비밀번호 ≠ 현재 비밀번호
   const isSame = await bcrypt.compare(new_password, tenant.password)
   if (isSame) {
     return c.json({ success: false, error: '새 비밀번호는 현재 비밀번호와 달라야 합니다.' }, 400)
