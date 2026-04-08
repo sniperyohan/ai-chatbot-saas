@@ -1,20 +1,30 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ai-chatbot-saas",
+  "main": "./dist/index.js",
   "compatibility_date": "2026-03-29",
-  "pages_build_output_dir": "./dist",
   "compatibility_flags": [
     "nodejs_compat"
-  ]
-  // 환경변수는 Cloudflare Dashboard > Pages > Settings > Environment Variables 에서 설정
+  ],
+  // Workers Static Assets - admin SPA, widget, 정적 파일 서빙
+  "assets": {
+    "directory": "./dist/public",
+    "binding": "ASSETS"
+  }
+  // ─────────────────────────────────────────────────────────────
+  // 환경변수는 Cloudflare Dashboard > Workers > Settings > Variables
   // 또는 wrangler secret put 명령어로 설정:
-  // npx wrangler pages secret put GEMINI_API_KEY --project-name ai-chatbot-saas
-  // npx wrangler pages secret put SUPABASE_URL --project-name ai-chatbot-saas
-  // npx wrangler pages secret put SUPABASE_ANON_KEY --project-name ai-chatbot-saas
-  // npx wrangler pages secret put SUPABASE_SERVICE_KEY --project-name ai-chatbot-saas
-  // npx wrangler pages secret put SUPER_JWT_SECRET --project-name ai-chatbot-saas
-  // npx wrangler pages secret put ADMIN_JWT_SECRET --project-name ai-chatbot-saas
-  // npx wrangler pages secret put RESEND_API_KEY --project-name ai-chatbot-saas
-  // npx wrangler pages secret put ENCRYPTION_KEY --project-name ai-chatbot-saas
-  // npx wrangler pages secret put ALLOWED_ORIGINS --project-name ai-chatbot-saas
+  //   npx wrangler secret put GEMINI_API_KEY
+  //   npx wrangler secret put SUPABASE_URL
+  //   npx wrangler secret put SUPABASE_ANON_KEY
+  //   npx wrangler secret put SUPABASE_SERVICE_KEY
+  //   npx wrangler secret put SUPER_JWT_SECRET
+  //   npx wrangler secret put ADMIN_JWT_SECRET
+  //   npx wrangler secret put RESEND_API_KEY
+  //   npx wrangler secret put ENCRYPTION_KEY
+  //   npx wrangler secret put ALLOWED_ORIGINS
+  //
+  // Supabase Integration (Cloudflare Dashboard > Workers > Integrations):
+  //   연결 시 SUPABASE_URL, SUPABASE_ANON_KEY 자동 바인딩
+  // ─────────────────────────────────────────────────────────────
 }

@@ -45,6 +45,36 @@ app.get('/api/health', (c) => {
   })
 })
 
+// Supabase 연결 진단 (관리자용)
+app.get('/api/health/supabase', async (c) => {
+  const supabaseUrl = c.env.SUPABASE_URL || ''
+  const supabaseKey = c.env.SUPABASE_SERVICE_KEY || ''
+
+  if (!supabaseUrl || supabaseUrl.includes('your-project')) {
+    return c.json({ status: 'not_configured', message: 'SUPABASE_URL 미설정' })
+  }
+
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/`, {
+      method: 'GET',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+      },
+      // @ts-ignore
+      cache: 'no-store',
+    })
+    const text = await res.text()
+    return c.json({
+      status: res.ok ? 'connected' : 'error',
+      http_status: res.status,
+      body_preview: text.substring(0, 200),
+    })
+  } catch (e: any) {
+    return c.json({ status: 'failed', error: e.message })
+  }
+})
+
 // ─────────────────────────────────────────
 // API 라우터 마운트
 // ─────────────────────────────────────────
