@@ -1,69 +1,127 @@
 // =====================================================
 // Supabase 클라이언트 팩토리
+// Cloudflare Workers 환경 최적화:
+//   - @supabase/supabase-js SDK 유지 (쿼리 빌더 편의성)
+//   - global.fetch 완전 교체: SDK 추가 헤더 제거, cache:no-store 강제
+//   - 프록시 URL 교체: Supabase 원본 → 리버스 프록시 경유
+//   - retrySupabase: error code 1016 간헐적 오류 재시도
 // =====================================================
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { Bindings } from '../types'
 
-// Cloudflare Workers 환경에서 error code 1016 방지:
-// - cache: 'no-store' → CDN/프록시 캐시 우회, 항상 오리진 연결
-// - keepalive: false  → Workers의 짧은 생명주기에 맞게 연결 재사용 비활성화
-const SUPABASE_FETCH_OPTIONS: RequestInit = {
-  cache: 'no-store',
-  keepalive: false,
+// ─────────────────────────────────────────
+// 프록시 설정
+//   - 원본 Supabase 호스트를 프록시 호스트로 교체
+//   - Host 헤더에 원본 호스트를 명시해 프록시가 올바른 백엔드로 포워딩
+// ─────────────────────────────────────────
+const SUPABASE_ORIGINAL_HOST = 'xbdpvd1xtrlgyjioubbr.supabase.co'
+const SUPABASE_PROXY_ORIGIN  = 'https://supabase.chatbotai.co.kr'
+
+function rewriteUrlToProxy(input: RequestInfo | URL): string {
+  const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+  // 원본 호스트가 포함된 경우에만 교체
+  if (urlStr.includes(SUPABASE_ORIGINAL_HOST)) {
+    return urlStr.replace(`https://${SUPABASE_ORIGINAL_HOST}`, SUPABASE_PROXY_ORIGIN)
+  }
+  return urlStr
+}
+
+// ─────────────────────────────────────────
+// Cloudflare Workers 전용 fetch 래퍼
+//
+// @supabase/supabase-js SDK는 기본적으로 아래 헤더를 자동 추가:
+//   - x-client-info: supabase-js/x.x.x
+//   - X-Supabase-Api-Version: 2024-01-01
+// 이 헤더들이 Cloudflare Workers → Supabase 구간에서
+// error code 1016 (연결 거부/프록시 오류)를 유발할 수 있음.
+// custom fetch로 불필요한 헤더를 모두 제거하고 최소 헤더만 유지.
+// 또한 URL을 프록시 호스트로 교체하고 Host 헤더를 원본으로 설정.
+// ─────────────────────────────────────────
+function makeSupabaseFetch(apiKey: string) {
+  return (url: RequestInfo | URL, options: RequestInit = {}): Promise<Response> => {
+    // ① URL을 프록시 호스트로 교체
+    const proxyUrl = rewriteUrlToProxy(url)
+
+    // ② SDK가 추가한 헤더 중 문제 유발 가능 헤더 제거
+    const originalHeaders = new Headers(options.headers || {})
+    const cleanHeaders = new Headers()
+
+    // 허용 헤더 화이트리스트만 통과
+    const ALLOWED_HEADERS = [
+      'content-type',
+      'apikey',
+      'authorization',
+      'prefer',
+      'range',
+      'accept',
+      'accept-profile',
+      'content-profile',
+    ]
+    for (const [key, value] of originalHeaders.entries()) {
+      if (ALLOWED_HEADERS.includes(key.toLowerCase())) {
+        cleanHeaders.set(key, value)
+      }
+    }
+
+    // ③ apikey / Authorization 항상 보장
+    if (!cleanHeaders.has('apikey')) cleanHeaders.set('apikey', apiKey)
+    if (!cleanHeaders.has('authorization')) cleanHeaders.set('authorization', `Bearer ${apiKey}`)
+
+    // ④ Host 헤더를 원본 Supabase 호스트로 설정 (프록시 포워딩용)
+    cleanHeaders.set('host', SUPABASE_ORIGINAL_HOST)
+
+    return fetch(proxyUrl, {
+      ...options,
+      headers: cleanHeaders,
+      // @ts-ignore - Cloudflare Workers supports cache option
+      cache: 'no-store',
+      keepalive: false,
+    })
+  }
 }
 
 // 일반 요청용 (anon key)
 export function createSupabaseClient(env: Bindings): SupabaseClient {
   return createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
-    global: {
-      fetch: (url, options = {}) =>
-        fetch(url, { ...options, ...SUPABASE_FETCH_OPTIONS }),
-    },
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { fetch: makeSupabaseFetch(env.SUPABASE_ANON_KEY) },
   })
 }
 
 // 서비스 롤 (RLS 우회, 관리자 작업용)
 export function createSupabaseAdmin(env: Bindings): SupabaseClient {
   return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-    global: {
-      fetch: (url, options = {}) =>
-        fetch(url, { ...options, ...SUPABASE_FETCH_OPTIONS }),
-    },
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { fetch: makeSupabaseFetch(env.SUPABASE_SERVICE_KEY) },
   })
 }
 
 // ─────────────────────────────────────────
-// retrySupabase: error code 1016 등 간헐적 오류에 대한 재시도 래퍼
-//
-// 사용법:
-//   const { data, error } = await retrySupabase(() =>
-//     supabase.from('tenants').select('*')
-//   )
-//
-// - maxRetries: 최대 재시도 횟수 (기본 3회, 총 시도 = 1 + 3 = 4)
-// - delayMs:    재시도 간격 ms (기본 500ms)
-// - 재시도 대상: error code 1016, internal error, DNS, fetch failed 등
-// - 최종 실패 시 마지막 { data, error } 반환 (에러 처리는 호출부에서)
+// retrySupabase: 간헐적 1016/네트워크 오류 재시도 래퍼
+//   - maxRetries: 최대 재시도 횟수 (기본 3)
+//   - delayMs:    재시도 간격 ms (기본 500)
+//   - 최종 실패 시 { data: null, error } 반환
 // ─────────────────────────────────────────
-export const RETRY_ERRORS = [
+const RETRY_PATTERNS = [
   'error code: 1016',
   'internal error',
-  'DNS',
+  'dns',
   'fetch failed',
-  'Failed to fetch',
+  'failed to fetch',
   'network',
-  'ENOTFOUND',
-  'Name or service not known',
+  'enotfound',
+  'name or service not known',
   'upstream connect error',
   'connection reset',
+  'etimedout',
+  'socket hang up',
 ]
 
+export const RETRY_ERRORS = RETRY_PATTERNS  // 하위 호환용 export
+
 function isRetryableError(msg: string): boolean {
-  return RETRY_ERRORS.some(pattern => msg.toLowerCase().includes(pattern.toLowerCase()))
+  const lower = msg.toLowerCase()
+  return RETRY_PATTERNS.some(p => lower.includes(p))
 }
 
 function sleep(ms: number): Promise<void> {
@@ -85,34 +143,25 @@ export async function retrySupabase<T>(
       const result = await fn()
       lastResult = result
 
-      // 성공 or 재시도 불필요한 에러 → 즉시 반환
       if (!result.error || !isRetryableError(result.error.message)) {
-        return result
+        return result   // 성공 또는 재시도 불필요 에러 → 즉시 반환
       }
 
-      // 재시도 가능한 에러
       if (attempt <= maxRetries) {
-        console.warn(
-          `[retrySupabase] 재시도 ${attempt}/${maxRetries} — ${result.error.message}`
-        )
+        console.warn(`[retrySupabase] 재시도 ${attempt}/${maxRetries} — ${result.error.message}`)
         await sleep(delayMs)
       } else {
-        console.error(
-          `[retrySupabase] 최대 재시도 초과 (${maxRetries}회) — ${result.error.message}`
-        )
+        console.error(`[retrySupabase] 최대 재시도 초과 (${maxRetries}회) — ${result.error.message}`)
       }
     } catch (e: any) {
-      lastResult = { data: null, error: { message: e.message ?? String(e) } }
+      const msg = e?.message ?? String(e)
+      lastResult = { data: null, error: { message: msg } }
 
-      if (attempt <= maxRetries && isRetryableError(e.message ?? '')) {
-        console.warn(
-          `[retrySupabase] 예외 재시도 ${attempt}/${maxRetries} — ${e.message}`
-        )
+      if (attempt <= maxRetries && isRetryableError(msg)) {
+        console.warn(`[retrySupabase] 예외 재시도 ${attempt}/${maxRetries} — ${msg}`)
         await sleep(delayMs)
       } else {
-        console.error(
-          `[retrySupabase] 예외 최대 재시도 초과 또는 재시도 불가 — ${e.message}`
-        )
+        console.error(`[retrySupabase] 예외 재시도 불가 — ${msg}`)
         return lastResult
       }
     }
