@@ -14,7 +14,7 @@ import { Bindings } from '../types'
 //   - 원본 Supabase 호스트를 프록시 호스트로 교체
 //   - Host 헤더에 원본 호스트를 명시해 프록시가 올바른 백엔드로 포워딩
 // ─────────────────────────────────────────
-const SUPABASE_ORIGINAL_HOST = 'xbdpvd1xtrlgyjioubbr.supabase.co'
+const SUPABASE_ORIGINAL_HOST = 'xbdpvdixtrlgyjioubbrr.supabase.co'
 const SUPABASE_PROXY_ORIGIN  = 'https://supabase.chatbotai.co.kr'
 
 function rewriteUrlToProxy(input: RequestInfo | URL): string {
@@ -80,9 +80,17 @@ function makeSupabaseFetch(apiKey: string) {
   }
 }
 
+// env.SUPABASE_URL의 호스트를 프록시로 교체한 URL 반환
+function getProxyUrl(supabaseUrl: string): string {
+  return supabaseUrl
+    .replace(`https://${SUPABASE_ORIGINAL_HOST}`, SUPABASE_PROXY_ORIGIN)
+    .replace('https://xbdpvd1xtrlgyjioubbr.supabase.co', SUPABASE_PROXY_ORIGIN)
+}
+
 // 일반 요청용 (anon key)
 export function createSupabaseClient(env: Bindings): SupabaseClient {
-  return createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
+  const url = getProxyUrl(env.SUPABASE_URL)
+  return createClient(url, env.SUPABASE_ANON_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
     global: { fetch: makeSupabaseFetch(env.SUPABASE_ANON_KEY) },
   })
@@ -90,7 +98,8 @@ export function createSupabaseClient(env: Bindings): SupabaseClient {
 
 // 서비스 롤 (RLS 우회, 관리자 작업용)
 export function createSupabaseAdmin(env: Bindings): SupabaseClient {
-  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
+  const url = getProxyUrl(env.SUPABASE_URL)
+  return createClient(url, env.SUPABASE_SERVICE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
     global: { fetch: makeSupabaseFetch(env.SUPABASE_SERVICE_KEY) },
   })
