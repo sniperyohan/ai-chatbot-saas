@@ -13,66 +13,22 @@ import { Bindings, Variables } from '../types'
 const chat = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
 // ─────────────────────────────────────────
-// Supabase 설정 확인 헬퍼
+// RAG 파이프라인 (D1 버전)
 // ─────────────────────────────────────────
-function isSupabaseConfigured(env: Bindings): boolean {
-  return (
-    !!env.SUPABASE_URL &&
-    !env.SUPABASE_URL.includes('your-project') &&
-    !!env.SUPABASE_SERVICE_KEY &&
-    !env.SUPABASE_SERVICE_KEY.includes('your_supabase')
-  )
-}
-
-// ─────────────────────────────────────────
-// 로컬 Fallback 처리 (Supabase 미연결 시)
-// ─────────────────────────────────────────
-// 로컬 키워드 응답 (Supabase 미연결 or local-test- ID)
-function localKeywordReply(
-  userMessage: string,
-  startTime: number
-): { answer: string; intent: string; isAnswered: boolean; responseTime: number } {
-  const msg = userMessage.toLowerCase()
-  let answer = '안녕하세요! 무엇을 도와드릴까요? 😊'
-  let intent = 'OTHER'
-
-  if (/^(안녕|hello|hi)/.test(msg)) {
-    answer = '안녕하세요! 무엇을 도와드릴까요? 😊'
-    intent = 'GREETING'
-  } else if (/(배송|주문|택배)/.test(msg)) {
-    answer = '배송 문의는 주문번호를 알려주시면 확인해드립니다.'
-    intent = 'ORDER_INQUIRY'
-  } else if (/(환불|취소|반품)/.test(msg)) {
-    answer = '환불/취소는 고객센터(1234-5678)로 문의해주세요.'
-    intent = 'COMPLAINT'
-  } else {
-    answer = '안녕하세요! 무엇이든 물어보세요. 😊'
-    intent = 'OTHER'
-  }
-
-  return { answer, intent, isAnswered: intent !== 'OTHER', responseTime: Date.now() - startTime }
-}
-
-async function handleChatFallback(
+async function handleChat(
   env: Bindings,
   tenantId: string,
   userMessage: string,
   channel: string,
   sessionId: string
 ): Promise<{ answer: string; intent: string; isAnswered: boolean; responseTime: number }> {
-  const startTime = Date.now()
-
-  // Supabase 미설정 or 로컬 테스트 ID → 키워드 응답
-  if (!isSupabaseConfigured(env) || tenantId.startsWith('local-test-')) {
-    return localKeywordReply(userMessage, startTime)
+  if (!env.DB) {
+    return {
+      answer: '서비스가 아직 설정되지 않았습니다.',
+      intent: 'OTHER', isAnswered: false, responseTime: 0,
+    }
   }
-
-  // Supabase 설정됨 → RAG 파이프라인
-  return processMessage(tenantId, userMessage, channel, sessionId, {
-    GEMINI_API_KEY: env.GEMINI_API_KEY,
-    SUPABASE_URL: env.SUPABASE_URL,
-    SUPABASE_SERVICE_KEY: env.SUPABASE_SERVICE_KEY,
-  })
+  return processMessage(tenantId, userMessage, channel, sessionId, env)
 }
 
 // ─────────────────────────────────────────
@@ -101,7 +57,7 @@ chat.post('/chat', async (c) => {
   }
 
   try {
-    const result = await handleChatFallback(
+    const result = await handleChat(
       c.env,
       tenant_id,
       message.trim(),
@@ -165,7 +121,7 @@ chat.post('/chat/widget', async (c) => {
   }
 
   try {
-    const result = await handleChatFallback(
+    const result = await handleChat(
       c.env,
       tenant_id,
       message.trim(),
@@ -218,7 +174,7 @@ chat.post('/kakao/chat', async (c) => {
   }
 
   try {
-    const result = await handleChatFallback(c.env, tenantId, userMessage, 'kakao', sessionId)
+    const result = await handleChat(c.env, tenantId, userMessage, 'kakao', sessionId)
     return c.json(kakaoResponse(result.answer))
   } catch {
     return c.json(kakaoResponse('잠시만 기다려 주세요. 😊 담당자에게 연결 중입니다.'))
@@ -259,7 +215,7 @@ chat.post('/naver/chat', async (c) => {
   }
 
   try {
-    const result = await handleChatFallback(c.env, tenantId, userMessage, 'naver', sessionId)
+    const result = await handleChat(c.env, tenantId, userMessage, 'naver', sessionId)
     return c.json(naverResponse(userId, result.answer))
   } catch {
     return c.json(naverResponse(userId, '잠시 오류가 발생했습니다. 담당자에게 문의해주세요.'))
@@ -299,7 +255,7 @@ chat.post('/messenger/chat', async (c) => {
   if (!userMessage || !tenantId) return c.json({ success: true })
 
   try {
-    const result = await handleChatFallback(c.env, tenantId, userMessage, 'messenger', sessionId)
+    const result = await handleChat(c.env, tenantId, userMessage, 'messenger', sessionId)
     return c.json({ recipient: { id: senderId }, message: { text: result.answer } })
   } catch {
     return c.json({ recipient: { id: senderId }, message: { text: '잠시 오류가 발생했습니다.' } })

@@ -3,28 +3,37 @@
   "name": "ai-chatbot-saas",
   "main": "./dist/index.js",
   "compatibility_date": "2026-03-29",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
-  // Workers Static Assets - admin SPA, widget, 정적 파일 서빙
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Workers Static Assets
   "assets": {
     "directory": "./dist/public",
     "binding": "ASSETS"
   }
-  // ─────────────────────────────────────────────────────────────
-  // 환경변수는 Cloudflare Dashboard > Workers > Settings > Variables
-  // 또는 wrangler secret put 명령어로 설정:
-  //   npx wrangler secret put GEMINI_API_KEY
-  //   npx wrangler secret put SUPABASE_URL
-  //   npx wrangler secret put SUPABASE_ANON_KEY
-  //   npx wrangler secret put SUPABASE_SERVICE_KEY
-  //   npx wrangler secret put SUPER_JWT_SECRET
-  //   npx wrangler secret put ADMIN_JWT_SECRET
-  //   npx wrangler secret put RESEND_API_KEY
-  //   npx wrangler secret put ENCRYPTION_KEY
-  //   npx wrangler secret put ALLOWED_ORIGINS
+
+  // ─── Cloudflare D1 Database ───────────────────────────────
+  // D1 DB 생성 후 아래 주석을 해제하고 database_id를 교체:
+  // 1. Cloudflare Dashboard → Workers & Pages → D1 → Create database
+  //    database name: ai-chatbot-saas-db
+  // 2. 생성된 database_id를 복사하여 아래에 붙여넣기
+  // 3. 주석 해제 후 재배포: npx wrangler deploy
   //
-  // Supabase Integration (Cloudflare Dashboard > Workers > Integrations):
-  //   연결 시 SUPABASE_URL, SUPABASE_ANON_KEY 자동 바인딩
-  // ─────────────────────────────────────────────────────────────
+  // "d1_databases": [
+  //   {
+  //     "binding": "DB",
+  //     "database_name": "ai-chatbot-saas-db",
+  //     "database_id": "여기에_DATABASE_ID_입력"
+  //   }
+  // ]
+
+  // ─── 환경변수 (Cloudflare Dashboard → Workers → Settings) ──
+  // npx wrangler secret put SUPER_JWT_SECRET
+  // npx wrangler secret put ADMIN_JWT_SECRET
+  // npx wrangler secret put GEMINI_API_KEY
+  // npx wrangler secret put RESEND_API_KEY
+  // npx wrangler secret put ENCRYPTION_KEY
+  // npx wrangler secret put ALLOWED_ORIGINS
+  // npx wrangler secret put LOCAL_SUPER_ADMIN_EMAIL
+  // npx wrangler secret put LOCAL_SUPER_ADMIN_PASSWORD_HASH
+  // ─────────────────────────────────────────────────────────
 }

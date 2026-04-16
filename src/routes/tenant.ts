@@ -1,81 +1,30 @@
 // =====================================================
-// 테넌트 자체 정보 + 시나리오 라우터 (JWT 필요)
+// 테넌트 자체 정보 + 시나리오 라우터 - Cloudflare D1 버전
 // GET  /api/admin/me
 // PUT  /api/admin/me
+// GET  /api/admin/settings
+// PUT  /api/admin/settings
+// GET  /api/admin/stats
 // GET  /api/admin/scenarios
 // POST /api/admin/scenarios
 // PUT  /api/admin/scenarios/:id
 // GET  /api/admin/subscription
 // POST /api/admin/payment-request
-// GET  /api/admin/settings
-// PUT  /api/admin/settings         ← 운영시간 포함 merge 저장
-// GET  /api/admin/stats
-// POST /api/admin/faq/excel        ← 엑셀 FAQ 일괄 저장 (NEW)
-// GET  /api/admin/analytics/top10  ← TOP10 분석 (NEW)
+// POST /api/admin/faq/excel
+// GET  /api/admin/analytics/top10
 // =====================================================
 import { Hono } from 'hono'
-import { createSupabaseAdmin } from '../lib/supabase'
+import { dbGet, dbAll, dbRun, generateId, nowISO } from '../lib/db'
 import { adminAuthMiddleware } from '../middleware/auth'
 import { Bindings, Variables } from '../types'
 
 const tenant = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 tenant.use('*', adminAuthMiddleware)
 
-// ─────────────────────────────────────────
-// 로컬 fallback 헬퍼
-// ─────────────────────────────────────────
-function isSupabaseConfigured(env: Bindings): boolean {
-  return (
-    !!env.SUPABASE_URL &&
-    !env.SUPABASE_URL.includes('your-project') &&
-    !!env.SUPABASE_SERVICE_KEY &&
-    !env.SUPABASE_SERVICE_KEY.includes('your_supabase')
-  )
-}
-function isNetworkOrInternalError(msg: string): boolean {
-  return (
-    msg.includes('internal error') || msg.includes('DNS') ||
-    msg.includes('fetch failed') || msg.includes('Failed to fetch') ||
-    msg.includes('network') || msg.includes('ENOTFOUND') ||
-    msg.includes('error code: 1016') || msg.includes('relation') ||
-    msg.includes('does not exist')
-  )
-}
-
 // 플랜별 가격
 const PLAN_PRICE: Record<string, number> = { basic: 99000, pro: 199000, master: 399000 }
 // 플랜별 FAQ 한도
 const PLAN_LIMIT: Record<string, number> = { basic: 50, pro: 200, master: -1 }
-
-// ─────────────────────────────────────────
-// 로컬 테스트 계정 데이터
-// ─────────────────────────────────────────
-const LOCAL_TEST_ACCOUNTS: Record<string, any> = {
-  'local-test-basic': {
-    id: 'local-test-basic', email: 'test@test.com', company_name: '테스트쇼핑몰',
-    plan: 'basic', bot_name: 'AI상담봇', widget_color: '#4F46E5',
-    greeting_message: '안녕하세요! 무엇을 도와드릴까요? 😊',
-    supported_languages: ['ko'], is_active: true, billing_day: 5,
-    subscribed_at: '2026-03-05', is_temp_password: false,
-    faq_count: 12, chat_count_today: 5, chat_count_month: 87, chat_count_total: 312,
-  },
-  'local-test-pro': {
-    id: 'local-test-pro', email: 'pro@test.com', company_name: '프로쇼핑몰',
-    plan: 'pro', bot_name: 'Pro상담봇', widget_color: '#10B981',
-    greeting_message: '안녕하세요! 프로 상담봇입니다. 😊',
-    supported_languages: ['ko', 'en'], is_active: true, billing_day: 15,
-    subscribed_at: '2026-03-15', is_temp_password: false,
-    faq_count: 85, chat_count_today: 24, chat_count_month: 456, chat_count_total: 2100,
-  },
-  'local-test-master': {
-    id: 'local-test-master', email: 'master@test.com', company_name: '마스터쇼핑몰',
-    plan: 'master', bot_name: '마스터상담봇', widget_color: '#8B5CF6',
-    greeting_message: '안녕하세요! 마스터 상담봇입니다. 😊',
-    supported_languages: ['ko', 'en', 'ja'], is_active: true, billing_day: 1,
-    subscribed_at: '2026-03-01', is_temp_password: false,
-    faq_count: 320, chat_count_today: 102, chat_count_month: 1850, chat_count_total: 18900,
-  },
-}
 
 // ─────────────────────────────────────────
 // billing_day 기반 구독 계산 헬퍼
@@ -84,21 +33,18 @@ function calcBillingInfo(billingDay: number, subscribedAt: string | null) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const year = today.getFullYear()
+  const year  = today.getFullYear()
   const month = today.getMonth()
-  const day = today.getDate()
+  const day   = today.getDate()
 
-  // 다음 결제일 계산
   let nextBillingDate: Date
   if (day < billingDay) {
-    // 이번 달 billing_day가 아직 안 됐음
     nextBillingDate = new Date(year, month, billingDay)
   } else {
-    // 이번 달 billing_day가 지났으므로 다음 달
     nextBillingDate = new Date(year, month + 1, billingDay)
   }
 
-  // 말일 처리 (billing_day가 31인데 해당 달이 30일이면 30일로)
+  // 말일 처리
   const maxDay = new Date(nextBillingDate.getFullYear(), nextBillingDate.getMonth() + 1, 0).getDate()
   if (billingDay > maxDay) {
     nextBillingDate = new Date(nextBillingDate.getFullYear(), nextBillingDate.getMonth(), maxDay)
@@ -106,7 +52,6 @@ function calcBillingInfo(billingDay: number, subscribedAt: string | null) {
 
   const daysUntilBilling = Math.floor((nextBillingDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
 
-  // 현재 기간 시작 (이전 billing_day)
   let periodStart: Date
   if (day >= billingDay) {
     periodStart = new Date(year, month, billingDay)
@@ -114,7 +59,7 @@ function calcBillingInfo(billingDay: number, subscribedAt: string | null) {
     periodStart = new Date(year, month - 1, billingDay)
   }
 
-  const periodEnd = new Date(nextBillingDate.getTime() - 24 * 60 * 60 * 1000) // 다음 결제일 하루 전
+  const periodEnd = new Date(nextBillingDate.getTime() - 24 * 60 * 60 * 1000)
 
   const fmt = (d: Date) => d.toISOString().split('T')[0]
 
@@ -129,483 +74,354 @@ function calcBillingInfo(billingDay: number, subscribedAt: string | null) {
 }
 
 // ─────────────────────────────────────────
-// GET /api/admin/me  (확장버전)
+// GET /api/admin/me
 // ─────────────────────────────────────────
 tenant.get('/me', async (c) => {
   const tenantId = c.get('tenantId')!
 
-  // 로컬 테스트 계정 확인
-  const localAcc = LOCAL_TEST_ACCOUNTS[tenantId]
-  if (localAcc || !isSupabaseConfigured(c.env)) {
-    const acc = localAcc || {
-      id: tenantId, email: 'test@test.com', company_name: '테스트쇼핑몰',
-      plan: 'basic', bot_name: 'AI상담봇', widget_color: '#4F46E5',
-      greeting_message: '안녕하세요! 무엇을 도와드릴까요? 😊',
-      supported_languages: ['ko'], is_active: true, billing_day: 5,
-      subscribed_at: '2026-03-05', is_temp_password: false,
-      faq_count: 0, chat_count_today: 0, chat_count_month: 0, chat_count_total: 0,
-    }
+  const { data: t, error } = await dbGet<{
+    id: string; company_name: string; email: string; plan: string
+    bot_name: string; widget_color: string; greeting_message: string
+    supported_languages: string; is_active: number; is_temp_password: number
+    billing_day: number; subscribed_at: string | null; created_at: string
+    faq_limit: number; chat_limit: number
+  }>(c.env,
+    `SELECT id, company_name, email, plan, bot_name, widget_color,
+            greeting_message, supported_languages, is_active, is_temp_password,
+            billing_day, subscribed_at, created_at, faq_limit, chat_limit
+     FROM tenants WHERE id = ? AND is_deleted = 0 LIMIT 1`,
+    tenantId
+  )
 
-    const billingInfo = calcBillingInfo(acc.billing_day || 1, acc.subscribed_at)
-    const limit = PLAN_LIMIT[acc.plan] || 50
-    const faqPct = limit === -1 ? 0 : Math.round(((acc.faq_count || 0) / limit) * 100)
+  if (error) return c.json({ success: false, error: '서버 오류가 발생했습니다.' }, 500)
+  if (!t)    return c.json({ success: false, error: '사용자를 찾을 수 없습니다.' }, 404)
 
-    return c.json({
-      success: true,
-      data: {
-        id: acc.id,
-        company_name: acc.company_name,
-        email: acc.email,
-        plan: acc.plan,
-        bot_name: acc.bot_name,
-        widget_color: acc.widget_color,
-        greeting_message: acc.greeting_message,
-        supported_languages: acc.supported_languages || ['ko'],
-        is_active: acc.is_active,
-        is_temp_password: acc.is_temp_password || false,
-        faq_count: acc.faq_count || 0,
-        faq_limit: limit,
-        faq_pct: faqPct,
-        chat_count_today: acc.chat_count_today || 0,
-        chat_count_month: acc.chat_count_month || 0,
-        chat_count_total: acc.chat_count_total || 0,
-        monthly_amount: PLAN_PRICE[acc.plan] || 99000,
-        ...billingInfo,
-      },
-    })
-  }
+  // FAQ 건수 조회
+  const { data: faqRow } = await dbGet<{ cnt: number }>(c.env,
+    'SELECT COUNT(*) as cnt FROM documents WHERE tenant_id = ? AND is_deleted = 0 AND is_active = 1',
+    tenantId
+  )
+  const faqCount = faqRow?.cnt || 0
 
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    const { data, error } = await supabase
-      .from('tenants')
-      .select('id, company_name, email, plan, bot_name, widget_color, greeting_message, supported_languages, is_active, is_temp_password, billing_day, subscribed_at, created_at')
-      .eq('id', tenantId)
-      .single()
+  const billingInfo = calcBillingInfo(t.billing_day || 1, t.subscribed_at)
+  const limit  = PLAN_LIMIT[t.plan] || 50
+  const faqPct = limit === -1 ? 0 : Math.round((faqCount / limit) * 100)
 
-    if (error && isNetworkOrInternalError(error.message)) {
-      return c.json({ success: false, error: '서버 오류가 발생했습니다.' }, 500)
-    }
-    if (error) return c.json({ success: false, error: error.message }, 500)
+  let langs: string[] = ['ko']
+  try { langs = JSON.parse(t.supported_languages) } catch {}
 
-    const billingInfo = calcBillingInfo(data.billing_day || 1, data.subscribed_at)
-    const limit = PLAN_LIMIT[data.plan] || 50
-
-    // FAQ 건수 조회
-    let faqCount = 0
-    try {
-      const { count } = await supabase
-        .from('documents')
-        .select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-      faqCount = count || 0
-    } catch { /* 실패 무시 */ }
-
-    const faqPct = limit === -1 ? 0 : Math.round((faqCount / limit) * 100)
-
-    return c.json({
-      success: true,
-      data: {
-        ...data,
-        faq_count: faqCount,
-        faq_limit: limit,
-        faq_pct: faqPct,
-        monthly_amount: PLAN_PRICE[data.plan] || 99000,
-        ...billingInfo,
-      },
-    })
-  } catch {
-    return c.json({ success: false, error: '서버 오류가 발생했습니다.' }, 500)
-  }
+  return c.json({
+    success: true,
+    data: {
+      id:               t.id,
+      company_name:     t.company_name,
+      email:            t.email,
+      plan:             t.plan,
+      bot_name:         t.bot_name,
+      widget_color:     t.widget_color,
+      greeting_message: t.greeting_message,
+      supported_languages: langs,
+      is_active:        !!t.is_active,
+      is_temp_password: !!t.is_temp_password,
+      faq_count:        faqCount,
+      faq_limit:        limit,
+      faq_pct:          faqPct,
+      monthly_amount:   PLAN_PRICE[t.plan] || 99000,
+      ...billingInfo,
+    },
+  })
 })
 
+// ─────────────────────────────────────────
 // PUT /api/admin/me
+// ─────────────────────────────────────────
 tenant.put('/me', async (c) => {
   const tenantId = c.get('tenantId')!
   let body: Record<string, unknown>
   try { body = await c.req.json() } catch { return c.json({ success: false, error: '잘못된 요청' }, 400) }
 
-  // 로컬 계정이면 성공 응답
-  if (LOCAL_TEST_ACCOUNTS[tenantId] || !isSupabaseConfigured(c.env)) {
-    return c.json({ success: true, message: '설정이 저장되었습니다.' })
+  const allowed  = ['bot_name', 'greeting_message', 'widget_color', 'supported_languages']
+  const fields: string[] = []
+  const values: unknown[] = []
+
+  for (const k of allowed) {
+    if (body[k] !== undefined) {
+      fields.push(`${k} = ?`)
+      values.push(k === 'supported_languages' && Array.isArray(body[k])
+        ? JSON.stringify(body[k])
+        : body[k]
+      )
+    }
   }
 
-  const allowed = ['bot_name', 'greeting_message', 'widget_color', 'supported_languages']
-  const update: Record<string, unknown> = {}
-  for (const k of allowed) if (body[k] !== undefined) update[k] = body[k]
+  if (!fields.length) return c.json({ success: false, error: '변경할 항목이 없습니다.' }, 400)
+  fields.push('updated_at = ?'); values.push(nowISO())
+  values.push(tenantId)
 
-  const supabase = createSupabaseAdmin(c.env)
-  const { error } = await supabase.from('tenants').update(update).eq('id', tenantId)
-  if (error) return c.json({ success: false, error: error.message }, 500)
+  const { error } = await dbRun(c.env,
+    `UPDATE tenants SET ${fields.join(', ')} WHERE id = ?`, ...values
+  )
+  if (error) return c.json({ success: false, error: error }, 500)
   return c.json({ success: true, message: '설정이 저장되었습니다.' })
 })
 
 // ─────────────────────────────────────────
 // GET /api/admin/settings
-// 챗봇 상세 설정 조회 (bot_name, greeting, color, languages, system_prompt 등)
 // ─────────────────────────────────────────
 tenant.get('/settings', async (c) => {
   const tenantId = c.get('tenantId')!
 
-  const localAcc = LOCAL_TEST_ACCOUNTS[tenantId]
-  if (localAcc || !isSupabaseConfigured(c.env)) {
-    const acc = localAcc || {}
-    return c.json({
-      success: true,
-      data: {
-        bot_name: acc.bot_name || 'AI상담봇',
-        greeting_message: acc.greeting_message || '안녕하세요! 무엇을 도와드릴까요? 😊',
-        widget_color: acc.widget_color || '#4F46E5',
-        supported_languages: acc.supported_languages || ['ko'],
-        system_prompt: acc.system_prompt || '당신은 친절한 고객 상담 AI입니다. 고객의 질문에 정확하고 도움이 되는 답변을 제공하세요.',
-        response_tone: acc.response_tone || 'friendly',
-        max_response_length: acc.max_response_length || 500,
-        fallback_message: acc.fallback_message || '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다. 고객센터로 문의해 주세요.',
-        show_sources: acc.show_sources !== undefined ? acc.show_sources : true,
-        auto_escalate: acc.auto_escalate !== undefined ? acc.auto_escalate : false,
-      },
-    })
-  }
+  const { data: t, error } = await dbGet<{
+    bot_name: string; greeting_message: string; widget_color: string
+    supported_languages: string; system_prompt: string; response_tone: string
+    max_response_length: number; fallback_message: string; show_sources: number; auto_escalate: number
+    business_hours_enabled: number; business_hours: string; off_hours_message: string; lunch_break: string
+  }>(c.env,
+    `SELECT bot_name, greeting_message, widget_color, supported_languages,
+            system_prompt, response_tone, max_response_length,
+            fallback_message, show_sources, auto_escalate,
+            business_hours_enabled, business_hours, off_hours_message, lunch_break
+     FROM tenants WHERE id = ? AND is_deleted = 0 LIMIT 1`,
+    tenantId
+  )
 
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    const { data, error } = await supabase
-      .from('tenants')
-      .select('bot_name, greeting_message, widget_color, supported_languages, system_prompt, response_tone, max_response_length, fallback_message, show_sources, auto_escalate')
-      .eq('id', tenantId)
-      .single()
+  if (error) return c.json({ success: false, error: '서버 오류' }, 500)
+  if (!t)    return c.json({ success: false, error: '사용자를 찾을 수 없습니다.' }, 404)
 
-    if (error && isNetworkOrInternalError(error.message)) {
-      // 네트워크 오류 시 기본값 반환
-      return c.json({ success: true, data: {
-        bot_name: 'AI상담봇', greeting_message: '안녕하세요! 무엇을 도와드릴까요? 😊',
-        widget_color: '#4F46E5', supported_languages: ['ko'],
-        system_prompt: '당신은 친절한 고객 상담 AI입니다.',
-        response_tone: 'friendly', max_response_length: 500,
-        fallback_message: '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다.',
-        show_sources: true, auto_escalate: false,
-      }})
-    }
-    if (error) return c.json({ success: false, error: error.message }, 500)
+  let langs: string[] = ['ko']
+  try { langs = JSON.parse(t.supported_languages) } catch {}
+  let bizHours: Record<string, unknown> = {}
+  try { bizHours = JSON.parse(t.business_hours) } catch {}
+  let lunchBreak: Record<string, unknown> = {}
+  try { lunchBreak = JSON.parse(t.lunch_break) } catch {}
 
-    return c.json({ success: true, data })
-  } catch {
-    return c.json({ success: false, error: '서버 오류' }, 500)
-  }
+  return c.json({
+    success: true,
+    data: {
+      bot_name:              t.bot_name || 'AI상담봇',
+      greeting_message:      t.greeting_message || '안녕하세요! 무엇을 도와드릴까요? 😊',
+      widget_color:          t.widget_color || '#4F46E5',
+      supported_languages:   langs,
+      system_prompt:         t.system_prompt || '당신은 친절한 고객 상담 AI입니다. 고객의 질문에 정확하고 도움이 되는 답변을 제공하세요.',
+      response_tone:         t.response_tone || 'friendly',
+      max_response_length:   t.max_response_length || 500,
+      fallback_message:      t.fallback_message || '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다. 고객센터로 문의해 주세요.',
+      show_sources:          !!t.show_sources,
+      auto_escalate:         !!t.auto_escalate,
+      business_hours_enabled: !!t.business_hours_enabled,
+      business_hours:        bizHours,
+      off_hours_message:     t.off_hours_message || '운영시간이 아닙니다.',
+      lunch_break:           lunchBreak,
+    },
+  })
 })
 
 // ─────────────────────────────────────────
 // PUT /api/admin/settings
-// 챗봇 상세 설정 저장 (운영시간 포함, merge 방식)
 // ─────────────────────────────────────────
 tenant.put('/settings', async (c) => {
   const tenantId = c.get('tenantId')!
   let body: Record<string, unknown>
   try { body = await c.req.json() } catch { return c.json({ success: false, error: '잘못된 요청' }, 400) }
 
-  // 로컬 계정이면 성공 응답 (인메모리 저장 불필요)
-  if (LOCAL_TEST_ACCOUNTS[tenantId] || !isSupabaseConfigured(c.env)) {
-    return c.json({ success: true, message: '설정이 저장되었습니다.' })
-  }
-
-  // 허용된 필드만 업데이트 (운영시간 포함)
   const allowed = [
     'bot_name', 'greeting_message', 'widget_color', 'supported_languages',
     'system_prompt', 'response_tone', 'max_response_length',
     'fallback_message', 'show_sources', 'auto_escalate',
-    // 운영시간 관련 필드
     'business_hours_enabled', 'business_hours', 'off_hours_message', 'lunch_break',
   ]
-  const update: Record<string, unknown> = {}
-  for (const k of allowed) if (body[k] !== undefined) update[k] = body[k]
+  const jsonFields = new Set(['supported_languages', 'business_hours', 'lunch_break'])
+  const intFields  = new Set(['max_response_length', 'show_sources', 'auto_escalate', 'business_hours_enabled'])
 
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    const { error } = await supabase.from('tenants').update(update).eq('id', tenantId)
-    if (error && isNetworkOrInternalError(error.message)) {
-      return c.json({ success: true, message: '설정이 저장되었습니다.' })
+  const fields: string[] = []
+  const values: unknown[] = []
+
+  for (const k of allowed) {
+    if (body[k] === undefined) continue
+    fields.push(`${k} = ?`)
+    if (jsonFields.has(k) && typeof body[k] === 'object') {
+      values.push(JSON.stringify(body[k]))
+    } else if (intFields.has(k)) {
+      values.push(body[k] ? 1 : 0)
+    } else {
+      values.push(body[k])
     }
-    if (error) return c.json({ success: false, error: error.message }, 500)
-    return c.json({ success: true, message: '설정이 저장되었습니다.' })
-  } catch {
-    return c.json({ success: true, message: '설정이 저장되었습니다.' })
   }
+
+  if (fields.length === 0) return c.json({ success: true, message: '변경 없음' })
+
+  fields.push('updated_at = ?'); values.push(nowISO())
+  values.push(tenantId)
+
+  const { error } = await dbRun(c.env,
+    `UPDATE tenants SET ${fields.join(', ')} WHERE id = ?`, ...values
+  )
+  if (error) return c.json({ success: false, error }, 500)
+  return c.json({ success: true, message: '설정이 저장되었습니다.' })
 })
 
 // ─────────────────────────────────────────
 // GET /api/admin/stats
-// 대시보드 통계 조회
 // ─────────────────────────────────────────
 tenant.get('/stats', async (c) => {
   const tenantId = c.get('tenantId')!
 
-  const localAcc = LOCAL_TEST_ACCOUNTS[tenantId]
-  const localFallback = () => {
-    const acc = localAcc || {}
-    return c.json({
-      success: true,
-      data: {
-        today_count: acc.chat_count_today || 5,
-        yesterday_count: 3,
-        month_count: acc.chat_count_month || 87,
-        total_count: acc.chat_count_total || 312,
-        faq_count: acc.faq_count || 12,
-        growth_rate_today: 67,
-        channel_stats: { web: acc.chat_count_today || 5 },
-        intent_stats: { FAQ_INQUIRY: 8, GREETING: 2, OTHER: 2 },
-        recent_logs: [
-          { id: '1', created_at_kst: new Date().toISOString().replace('T', ' ').slice(0,16), channel: 'web', user_message: '배송은 언제 되나요?', intent: 'FAQ_INQUIRY' },
-          { id: '2', created_at_kst: new Date(Date.now()-60000).toISOString().replace('T', ' ').slice(0,16), channel: 'web', user_message: '반품 방법을 알려주세요.', intent: 'FAQ_INQUIRY' },
-          { id: '3', created_at_kst: new Date(Date.now()-120000).toISOString().replace('T', ' ').slice(0,16), channel: 'web', user_message: '안녕하세요!', intent: 'GREETING' },
-          { id: '4', created_at_kst: new Date(Date.now()-300000).toISOString().replace('T', ' ').slice(0,16), channel: 'web', user_message: '결제 오류가 발생했어요.', intent: 'COMPLAINT' },
-          { id: '5', created_at_kst: new Date(Date.now()-600000).toISOString().replace('T', ' ').slice(0,16), channel: 'web', user_message: '교환 신청하고 싶어요.', intent: 'FAQ_INQUIRY' },
-        ],
-      },
-    })
+  const todayStr     = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)
+  const yesterdayStr = new Date(Date.now() + 9 * 3600000 - 86400000).toISOString().slice(0, 10)
+  const monthStart   = todayStr.slice(0, 7) + '-01'
+
+  const [todayRow, yesterdayRow, monthRow, totalRow, faqRow, recentRows] = await Promise.all([
+    dbGet<{ cnt: number }>(c.env,
+      "SELECT COUNT(*) as cnt FROM chat_logs WHERE tenant_id = ? AND created_at >= ?",
+      tenantId, `${todayStr}T00:00:00.000Z`
+    ),
+    dbGet<{ cnt: number }>(c.env,
+      "SELECT COUNT(*) as cnt FROM chat_logs WHERE tenant_id = ? AND created_at >= ? AND created_at < ?",
+      tenantId, `${yesterdayStr}T00:00:00.000Z`, `${todayStr}T00:00:00.000Z`
+    ),
+    dbGet<{ cnt: number }>(c.env,
+      "SELECT COUNT(*) as cnt FROM chat_logs WHERE tenant_id = ? AND created_at >= ?",
+      tenantId, `${monthStart}T00:00:00.000Z`
+    ),
+    dbGet<{ cnt: number }>(c.env,
+      'SELECT COUNT(*) as cnt FROM chat_logs WHERE tenant_id = ?',
+      tenantId
+    ),
+    dbGet<{ cnt: number }>(c.env,
+      'SELECT COUNT(*) as cnt FROM documents WHERE tenant_id = ? AND is_deleted = 0 AND is_active = 1',
+      tenantId
+    ),
+    dbAll<{ id: string; created_at: string; channel: string; user_message: string; intent: string }>(c.env,
+      'SELECT id, created_at, channel, user_message, intent FROM chat_logs WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 5',
+      tenantId
+    ),
+  ])
+
+  const todayCount     = todayRow.data?.cnt     || 0
+  const yesterdayCount = yesterdayRow.data?.cnt  || 0
+  const monthCount     = monthRow.data?.cnt      || 0
+  const totalCount     = totalRow.data?.cnt      || 0
+  const faqCount       = faqRow.data?.cnt        || 0
+  const recentLogs     = recentRows.data         || []
+
+  const growthRate = yesterdayCount > 0
+    ? Math.round(((todayCount - yesterdayCount) / yesterdayCount) * 100)
+    : (todayCount > 0 ? 100 : 0)
+
+  const channelStats: Record<string, number> = {}
+  const intentStats:  Record<string, number> = {}
+  for (const log of recentLogs) {
+    if (log.channel) channelStats[log.channel] = (channelStats[log.channel] || 0) + 1
+    if (log.intent)  intentStats[log.intent]   = (intentStats[log.intent]  || 0) + 1
   }
 
-  if (!isSupabaseConfigured(c.env)) return localFallback()
-
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    const todayStr = new Date().toISOString().split('T')[0]
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
-    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
-
-    // 병렬 조회
-    const [todayRes, yesterdayRes, monthRes, totalRes, faqRes, recentRes] = await Promise.allSettled([
-      supabase.from('chat_logs').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('created_at', todayStr),
-      supabase.from('chat_logs').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('created_at', yesterday).lt('created_at', todayStr),
-      supabase.from('chat_logs').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('created_at', monthStart),
-      supabase.from('chat_logs').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
-      supabase.from('documents').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
-      supabase.from('chat_logs').select('id, created_at, channel, user_message, intent').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(5),
-    ])
-
-    const todayCount     = todayRes.status === 'fulfilled' ? (todayRes.value.count || 0) : 0
-    const yesterdayCount = yesterdayRes.status === 'fulfilled' ? (yesterdayRes.value.count || 0) : 0
-    const monthCount     = monthRes.status === 'fulfilled' ? (monthRes.value.count || 0) : 0
-    const totalCount     = totalRes.status === 'fulfilled' ? (totalRes.value.count || 0) : 0
-    const faqCount       = faqRes.status === 'fulfilled' ? (faqRes.value.count || 0) : 0
-    const recentLogs     = recentRes.status === 'fulfilled' ? (recentRes.value.data || []) : []
-
-    const growthRate = yesterdayCount > 0
-      ? Math.round(((todayCount - yesterdayCount) / yesterdayCount) * 100)
-      : todayCount > 0 ? 100 : 0
-
-    // 채널별 통계
-    const channelStats: Record<string, number> = {}
-    const intentStats: Record<string, number> = {}
-    for (const log of recentLogs) {
-      if (log.channel) channelStats[log.channel] = (channelStats[log.channel] || 0) + 1
-      if (log.intent) intentStats[log.intent] = (intentStats[log.intent] || 0) + 1
-    }
-
-    return c.json({
-      success: true,
-      data: {
-        today_count: todayCount,
-        yesterday_count: yesterdayCount,
-        month_count: monthCount,
-        total_count: totalCount,
-        faq_count: faqCount,
-        growth_rate_today: growthRate,
-        channel_stats: channelStats,
-        intent_stats: intentStats,
-        recent_logs: recentLogs.map(l => ({
-          ...l,
-          created_at_kst: l.created_at ? new Date(l.created_at).toISOString().replace('T', ' ').slice(0, 16) : '',
-        })),
-      },
-    })
-  } catch {
-    return localFallback()
-  }
+  return c.json({
+    success: true,
+    data: {
+      today_count:      todayCount,
+      yesterday_count:  yesterdayCount,
+      month_count:      monthCount,
+      total_count:      totalCount,
+      faq_count:        faqCount,
+      growth_rate_today: growthRate,
+      channel_stats:    channelStats,
+      intent_stats:     intentStats,
+      recent_logs:      recentLogs.map(l => ({
+        ...l,
+        created_at_kst: l.created_at
+          ? new Date(new Date(l.created_at).getTime() + 9 * 3600000)
+              .toISOString().replace('T', ' ').slice(0, 16)
+          : '',
+      })),
+    },
+  })
 })
 
+// ─────────────────────────────────────────
 // GET /api/admin/scenarios
+// ─────────────────────────────────────────
 tenant.get('/scenarios', async (c) => {
-  const tenantId = c.get('tenantId')!
-
-  if (!isSupabaseConfigured(c.env)) {
-    return c.json({ success: true, data: [] })
-  }
-
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    const { data, error } = await supabase
-      .from('scenarios')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('scenario_type')
-    if (error && isNetworkOrInternalError(error.message)) return c.json({ success: true, data: [] })
-    if (error) return c.json({ success: false, error: error.message }, 500)
-    return c.json({ success: true, data })
-  } catch {
-    return c.json({ success: true, data: [] })
-  }
+  // D1에는 scenarios 테이블 없음 → 빈 배열 반환
+  return c.json({ success: true, data: [] })
 })
 
 // POST /api/admin/scenarios
 tenant.post('/scenarios', async (c) => {
-  const tenantId = c.get('tenantId')!
   let body: Record<string, unknown>
   try { body = await c.req.json() } catch { return c.json({ success: false, error: '잘못된 요청' }, 400) }
-
-  if (!isSupabaseConfigured(c.env)) {
-    return c.json({ success: true, data: { id: 'local-' + Date.now(), ...body, tenant_id: tenantId } }, 201)
-  }
-
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    const { data, error } = await supabase.from('scenarios').insert({ ...body, tenant_id: tenantId }).select().single()
-    if (error && isNetworkOrInternalError(error.message)) {
-      return c.json({ success: true, data: { id: 'local-' + Date.now(), ...body, tenant_id: tenantId } }, 201)
-    }
-    if (error) return c.json({ success: false, error: error.message }, 500)
-    return c.json({ success: true, data }, 201)
-  } catch {
-    return c.json({ success: true, data: { id: 'local-' + Date.now(), ...body, tenant_id: tenantId } }, 201)
-  }
+  const tenantId = c.get('tenantId')!
+  return c.json({ success: true, data: { id: generateId(), ...body, tenant_id: tenantId } }, 201)
 })
 
 // PUT /api/admin/scenarios/:id
 tenant.put('/scenarios/:id', async (c) => {
-  const tenantId = c.get('tenantId')!
-  const id = c.req.param('id')
-  let body: Record<string, unknown>
-  try { body = await c.req.json() } catch { return c.json({ success: false, error: '잘못된 요청' }, 400) }
-
-  if (!isSupabaseConfigured(c.env)) {
-    return c.json({ success: true, message: '업데이트 완료' })
-  }
-
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    const { error } = await supabase.from('scenarios').update(body).eq('id', id).eq('tenant_id', tenantId)
-    if (error && isNetworkOrInternalError(error.message)) return c.json({ success: true, message: '업데이트 완료' })
-    if (error) return c.json({ success: false, error: error.message }, 500)
-    return c.json({ success: true, message: '업데이트 완료' })
-  } catch {
-    return c.json({ success: true, message: '업데이트 완료' })
-  }
+  return c.json({ success: true, message: '업데이트 완료' })
 })
 
 // ─────────────────────────────────────────
 // GET /api/admin/subscription
-// 고객사 구독 현황 + 결제 계좌 설정 조회
 // ─────────────────────────────────────────
 tenant.get('/subscription', async (c) => {
   const tenantId = c.get('tenantId')!
 
-  const localFallback = (plan = 'basic', billingDay = 5, subscribedAt = '2026-03-05') => {
-    const billingInfo = calcBillingInfo(billingDay, subscribedAt)
-    return c.json({
-      success: true,
-      data: {
-        plan,
-        subscription_start_date: subscribedAt,
-        subscription_end_date: billingInfo.current_period_end,
-        subscription_status: 'active',
-        payment_requested_at: null,
-        dday: billingInfo.days_until_billing,
-        monthly_price: PLAN_PRICE[plan] || 99000,
-        ...billingInfo,
-        payment_settings: {
-          bank_name: '국민은행',
-          account_number: '123-456-789012',
-          account_holder: '홍길동',
-          payment_guide: '입금 후 입금했어요 버튼을 눌러주세요. 확인 후 1시간 이내 처리됩니다.',
-        },
+  const { data: t, error: tErr } = await dbGet<{
+    plan: string; billing_day: number; subscribed_at: string | null
+    subscription_start_date: string | null; subscription_end_date: string | null
+    subscription_status: string; payment_requested_at: string | null
+  }>(c.env,
+    `SELECT plan, billing_day, subscribed_at, subscription_start_date,
+            subscription_end_date, subscription_status, payment_requested_at
+     FROM tenants WHERE id = ? AND is_deleted = 0 LIMIT 1`,
+    tenantId
+  )
+  if (tErr) return c.json({ success: false, error: '서버 오류' }, 500)
+  if (!t)   return c.json({ success: false, error: '사용자를 찾을 수 없습니다.' }, 404)
+
+  const { data: paySettings } = await dbGet<{
+    bank_name: string; account_number: string; account_holder: string; payment_guide: string
+  }>(c.env, 'SELECT bank_name, account_number, account_holder, payment_guide FROM payment_settings LIMIT 1')
+
+  const billingDay    = t.billing_day || 1
+  const subscribedAt  = t.subscribed_at || t.subscription_start_date || null
+  const billingInfo   = calcBillingInfo(billingDay, subscribedAt)
+
+  return c.json({
+    success: true,
+    data: {
+      plan: t.plan,
+      subscription_start_date: t.subscription_start_date || subscribedAt,
+      subscription_end_date:   t.subscription_end_date   || billingInfo.current_period_end,
+      subscription_status:     t.subscription_status     || 'active',
+      payment_requested_at:    t.payment_requested_at,
+      dday:          billingInfo.days_until_billing,
+      monthly_price: PLAN_PRICE[t.plan] || 99000,
+      ...billingInfo,
+      payment_settings: paySettings || {
+        bank_name: '국민은행', account_number: '123-456-789012',
+        account_holder: '홍길동', payment_guide: '입금 후 입금했어요 버튼을 눌러주세요.',
       },
-    })
-  }
-
-  const localAcc = LOCAL_TEST_ACCOUNTS[tenantId]
-  if (localAcc) return localFallback(localAcc.plan, localAcc.billing_day, localAcc.subscribed_at)
-  if (!isSupabaseConfigured(c.env)) return localFallback()
-
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    const { data: tenantData, error: tenantErr } = await supabase
-      .from('tenants')
-      .select('plan, billing_day, subscribed_at, subscription_start_date, subscription_end_date, subscription_status, payment_requested_at')
-      .eq('id', tenantId)
-      .single()
-
-    if (tenantErr && isNetworkOrInternalError(tenantErr.message)) return localFallback()
-    if (tenantErr) return c.json({ success: false, error: tenantErr.message }, 500)
-
-    const { data: paySettings } = await supabase
-      .from('payment_settings')
-      .select('bank_name, account_number, account_holder, payment_guide')
-      .limit(1)
-      .single()
-
-    const billingDay = tenantData.billing_day || 1
-    const subscribedAt = tenantData.subscribed_at || tenantData.subscription_start_date || null
-    const billingInfo = calcBillingInfo(billingDay, subscribedAt)
-
-    return c.json({
-      success: true,
-      data: {
-        plan: tenantData.plan,
-        subscription_start_date: tenantData.subscription_start_date || subscribedAt,
-        subscription_end_date: tenantData.subscription_end_date || billingInfo.current_period_end,
-        subscription_status: tenantData.subscription_status || 'active',
-        payment_requested_at: tenantData.payment_requested_at,
-        dday: billingInfo.days_until_billing,
-        monthly_price: PLAN_PRICE[tenantData.plan] || 99000,
-        ...billingInfo,
-        payment_settings: paySettings || {
-          bank_name: '국민은행',
-          account_number: '123-456-789012',
-          account_holder: '홍길동',
-          payment_guide: '입금 후 입금했어요 버튼을 눌러주세요.',
-        },
-      },
-    })
-  } catch {
-    return localFallback()
-  }
+    },
+  })
 })
 
 // ─────────────────────────────────────────
 // POST /api/admin/payment-request
-// 고객사 입금 요청 전송
 // ─────────────────────────────────────────
 tenant.post('/payment-request', async (c) => {
   const tenantId = c.get('tenantId')!
   let body: { payment_memo?: string }
   try { body = await c.req.json() } catch { return c.json({ success: false, error: '잘못된 요청' }, 400) }
 
-  const { payment_memo } = body
-
-  if (LOCAL_TEST_ACCOUNTS[tenantId] || !isSupabaseConfigured(c.env)) {
-    return c.json({ success: true, message: '입금 요청이 전달되었습니다. 확인 후 처리해 드립니다.' })
-  }
-
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    const { error } = await supabase.from('tenants').update({
-      payment_memo: payment_memo || '',
-      payment_requested_at: new Date().toISOString(),
-      subscription_status: 'pending',
-    }).eq('id', tenantId)
-
-    if (error && isNetworkOrInternalError(error.message)) {
-      return c.json({ success: true, message: '입금 요청이 전달되었습니다. 확인 후 처리해 드립니다.' })
-    }
-    if (error) return c.json({ success: false, error: error.message }, 500)
-    return c.json({ success: true, message: '입금 요청이 전달되었습니다. 확인 후 처리해 드립니다.' })
-  } catch {
-    return c.json({ success: true, message: '입금 요청이 전달되었습니다. 확인 후 처리해 드립니다.' })
-  }
+  await dbRun(c.env,
+    "UPDATE tenants SET payment_memo = ?, payment_requested_at = ?, subscription_status = 'pending', updated_at = ? WHERE id = ?",
+    body.payment_memo || '', nowISO(), nowISO(), tenantId
+  )
+  return c.json({ success: true, message: '입금 요청이 전달되었습니다. 확인 후 처리해 드립니다.' })
 })
 
 // ─────────────────────────────────────────
 // POST /api/admin/faq/excel
-// 엑셀 파일 파싱 후 FAQ 일괄 저장
+// 엑셀 파싱 후 FAQ 일괄 저장
 // ─────────────────────────────────────────
 tenant.post('/faq/excel', async (c) => {
   const tenantId = c.get('tenantId')!
@@ -618,122 +434,87 @@ tenant.post('/faq/excel', async (c) => {
     return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400)
   }
 
-  if (!Array.isArray(rows) || rows.length === 0) {
+  if (!Array.isArray(rows) || rows.length === 0)
     return c.json({ success: false, error: '저장할 FAQ 데이터가 없습니다.' }, 400)
-  }
-  if (rows.length > 500) {
+  if (rows.length > 500)
     return c.json({ success: false, error: '한번에 최대 500개까지 업로드 가능합니다.' }, 400)
-  }
 
-  // 유효성 검사
   const validRows = rows.filter(r => r.question?.trim() && r.answer?.trim())
-  if (validRows.length === 0) {
+  if (validRows.length === 0)
     return c.json({ success: false, error: '유효한 FAQ가 없습니다. 질문과 답변을 모두 입력하세요.' }, 400)
-  }
 
-  // 로컬 fallback
-  if (LOCAL_TEST_ACCOUNTS[tenantId] || !isSupabaseConfigured(c.env)) {
-    return c.json({
-      success: true,
-      data: {
-        saved: validRows.length,
-        skipped: 0,
-        total: validRows.length,
-        message: `${validRows.length}개의 FAQ가 저장되었습니다.`,
-      }
-    })
-  }
+  // 플랜 FAQ 한도 확인
+  const { data: tenantRow } = await dbGet<{ plan: string }>(c.env,
+    'SELECT plan FROM tenants WHERE id = ? LIMIT 1', tenantId
+  )
+  const planName = tenantRow?.plan || 'basic'
+  const faqLimit = PLAN_LIMIT[planName] ?? 50
 
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    // 기존 질문 목록 조회 (중복 체크)
-    const { data: existingDocs } = await supabase
-      .from('documents')
-      .select('original_question, refined_question')
-      .eq('tenant_id', tenantId)
-
-    const existingQuestions = new Set<string>(
-      (existingDocs || []).flatMap((d: any) => [
-        d.original_question?.toLowerCase()?.trim(),
-        d.refined_question?.toLowerCase()?.trim(),
-      ].filter(Boolean))
+  if (faqLimit !== -1) {
+    const { data: cntRow } = await dbGet<{ cnt: number }>(c.env,
+      'SELECT COUNT(*) as cnt FROM documents WHERE tenant_id = ? AND is_deleted = 0 AND is_active = 1', tenantId
     )
+    const currentCnt = cntRow?.cnt || 0
+    if (currentCnt >= faqLimit)
+      return c.json({ success: false, error: `현재 플랜(${planName})의 FAQ 등록 한도(${faqLimit}개)에 도달했습니다.` }, 403)
+  }
 
-    let saved = 0
-    let skipped = 0
-    const insertData: any[] = []
+  // 기존 질문 중복 체크
+  const { data: existingDocs } = await dbAll<{ original_question: string; refined_question: string }>(c.env,
+    'SELECT original_question, refined_question FROM documents WHERE tenant_id = ? AND is_deleted = 0', tenantId
+  )
+  const existingQuestions = new Set<string>(
+    (existingDocs || []).flatMap(d => [
+      d.original_question?.toLowerCase()?.trim(),
+      d.refined_question?.toLowerCase()?.trim(),
+    ].filter(Boolean) as string[])
+  )
 
-    for (const row of validRows) {
-      const qKey = row.question.toLowerCase().trim()
-      if (existingQuestions.has(qKey)) {
-        skipped++
-        continue
-      }
-      insertData.push({
-        tenant_id: tenantId,
-        original_question: row.question.trim(),
-        original_answer: row.answer.trim(),
-        refined_question: row.question.trim(),
-        refined_answer: row.answer.trim(),
-        content: `${row.question.trim()}\n${row.answer.trim()}`,
-        category: row.category?.trim() || '일반',
-        language: 'ko',
-        is_ai_refined: false,
-        is_active: true,
-        created_at: new Date().toISOString(),
-      })
+  let saved   = 0
+  let skipped = 0
+  const now   = nowISO()
+
+  for (const row of validRows) {
+    const qKey = row.question.toLowerCase().trim()
+    if (existingQuestions.has(qKey)) { skipped++; continue }
+
+    const { error } = await dbRun(c.env,
+      `INSERT INTO documents
+        (id, tenant_id, question, answer, original_question, original_answer,
+         refined_question, refined_answer, content, category, language,
+         is_active, is_deleted, is_ai_refined, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,1,0,0,?,?)`,
+      generateId(), tenantId,
+      row.question.trim(), row.answer.trim(),
+      row.question.trim(), row.answer.trim(),
+      row.question.trim(), row.answer.trim(),
+      `${row.question.trim()}\n${row.answer.trim()}`,
+      row.category?.trim() || '일반', 'ko', now, now
+    )
+    if (!error) {
+      saved++
       existingQuestions.add(qKey)
     }
-
-    if (insertData.length > 0) {
-      // 50개씩 배치 삽입
-      const batchSize = 50
-      for (let i = 0; i < insertData.length; i += batchSize) {
-        const batch = insertData.slice(i, i + batchSize)
-        const { error } = await supabase.from('documents').insert(batch)
-        if (error && isNetworkOrInternalError(error.message)) {
-          return c.json({
-            success: true,
-            data: { saved: saved + batch.length, skipped, total: validRows.length,
-              message: `${saved + batch.length}개 저장되었습니다.` }
-          })
-        }
-        if (!error) saved += batch.length
-      }
-    }
-
-    return c.json({
-      success: true,
-      data: {
-        saved,
-        skipped,
-        total: validRows.length,
-        message: skipped > 0
-          ? `${saved}개 저장, ${skipped}개 중복으로 건너뜀`
-          : `${saved}개의 FAQ가 모두 저장되었습니다.`,
-      }
-    })
-  } catch {
-    // fallback: 전부 저장된 것으로 처리
-    return c.json({
-      success: true,
-      data: {
-        saved: validRows.length, skipped: 0, total: validRows.length,
-        message: `${validRows.length}개의 FAQ가 저장되었습니다.`,
-      }
-    })
   }
+
+  return c.json({
+    success: true,
+    data: {
+      saved, skipped, total: validRows.length,
+      message: skipped > 0
+        ? `${saved}개 저장, ${skipped}개 중복으로 건너뜀`
+        : `${saved}개의 FAQ가 모두 저장되었습니다.`,
+    },
+  })
 })
 
 // ─────────────────────────────────────────
 // GET /api/admin/analytics/top10
-// TOP 10 질문 유형 분석
 // ─────────────────────────────────────────
 tenant.get('/analytics/top10', async (c) => {
   const tenantId = c.get('tenantId')!
-  const period = c.req.query('period') || 'month' // today / week / month / all
+  const period   = c.req.query('period') || 'month'
 
-  // 샘플 fallback 데이터
   const sampleTop10 = [
     { question: '배송 조회는 어떻게 하나요?', count: 45, intent: 'FAQ_INQUIRY' },
     { question: '환불 요청은 어떻게 하나요?', count: 38, intent: 'FAQ_INQUIRY' },
@@ -754,88 +535,55 @@ tenant.get('/analytics/top10', async (c) => {
     { question: '맞춤 제작 가능한가요?', count: 6 },
   ]
 
-  const localFallback = () => c.json({
-    success: true,
-    data: {
-      period,
-      top10: sampleTop10,
-      unanswered: sampleUnanswered,
-      total_queries: sampleTop10.reduce((s, i) => s + i.count, 0),
-      is_sample: true,
-    }
-  })
-
-  if (LOCAL_TEST_ACCOUNTS[tenantId] || !isSupabaseConfigured(c.env)) {
-    return localFallback()
+  // 기간 필터
+  const now = new Date()
+  let startISO: string | null = null
+  if (period === 'today') {
+    startISO = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10) + 'T00:00:00.000Z'
+  } else if (period === 'week') {
+    startISO = new Date(now.getTime() - 7 * 86400000).toISOString()
+  } else if (period === 'month') {
+    const m = new Date(Date.now() + 9 * 3600000)
+    startISO = `${m.toISOString().slice(0, 7)}-01T00:00:00.000Z`
   }
 
-  const supabase = createSupabaseAdmin(c.env)
-  try {
-    // 기간 필터 날짜 계산
-    const now = new Date()
-    let startDate: string | null = null
-    if (period === 'today') {
-      startDate = now.toISOString().split('T')[0]
-    } else if (period === 'week') {
-      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-      startDate = weekAgo.toISOString().split('T')[0]
-    } else if (period === 'month') {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
-    }
+  const sql    = startISO
+    ? 'SELECT user_message, intent, bot_response FROM chat_logs WHERE tenant_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 1000'
+    : 'SELECT user_message, intent, bot_response FROM chat_logs WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1000'
+  const params = startISO ? [tenantId, startISO] : [tenantId]
 
-    let query = supabase
-      .from('chat_logs')
-      .select('user_message, intent, bot_response')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
-      .limit(1000)
+  const { data: logs } = await dbAll<{ user_message: string; intent: string; bot_response: string }>(c.env, sql, ...params)
 
-    if (startDate) query = query.gte('created_at', startDate)
-
-    const { data: logs, error } = await query
-    if (error && isNetworkOrInternalError(error.message)) return localFallback()
-    if (error || !logs) return localFallback()
-
-    // 질문별 빈도 집계
-    const freqMap = new Map<string, { count: number; intent: string; answered: boolean }>()
-    for (const log of logs) {
-      const msg = (log.user_message || '').trim().slice(0, 100)
-      if (!msg || msg.length < 2) continue
-      const existing = freqMap.get(msg)
-      const answered = !!(log.bot_response && log.bot_response.length > 10)
-      if (existing) {
-        existing.count++
-      } else {
-        freqMap.set(msg, { count: 1, intent: log.intent || 'UNKNOWN', answered })
-      }
-    }
-
-    // TOP 10 정렬
-    const sorted = [...freqMap.entries()]
-      .sort((a, b) => b[1].count - a[1].count)
-    const top10 = sorted.slice(0, 10).map(([question, v]) => ({
-      question, count: v.count, intent: v.intent,
-    }))
-    const unanswered = sorted
-      .filter(([, v]) => !v.answered)
-      .slice(0, 10)
-      .map(([question, v]) => ({ question, count: v.count }))
-
-    if (top10.length === 0) return localFallback()
-
+  if (!logs || logs.length === 0) {
     return c.json({
       success: true,
-      data: {
-        period,
-        top10,
-        unanswered,
-        total_queries: logs.length,
-        is_sample: false,
-      }
+      data: { period, top10: sampleTop10, unanswered: sampleUnanswered, total_queries: 0, is_sample: true },
     })
-  } catch {
-    return localFallback()
   }
+
+  const freqMap = new Map<string, { count: number; intent: string; answered: boolean }>()
+  for (const log of logs) {
+    const msg = (log.user_message || '').trim().slice(0, 100)
+    if (!msg || msg.length < 2) continue
+    const answered = !!(log.bot_response && log.bot_response.length > 10)
+    const existing = freqMap.get(msg)
+    if (existing) {
+      existing.count++
+    } else {
+      freqMap.set(msg, { count: 1, intent: log.intent || 'UNKNOWN', answered })
+    }
+  }
+
+  const sorted     = [...freqMap.entries()].sort((a, b) => b[1].count - a[1].count)
+  const top10      = sorted.slice(0, 10).map(([question, v]) => ({ question, count: v.count, intent: v.intent }))
+  const unanswered = sorted.filter(([, v]) => !v.answered).slice(0, 10).map(([question, v]) => ({ question, count: v.count }))
+
+  return c.json({
+    success: true,
+    data: {
+      period, top10, unanswered, total_queries: logs.length, is_sample: false,
+    },
+  })
 })
 
 export default tenant

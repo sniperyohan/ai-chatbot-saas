@@ -1,12 +1,12 @@
 // =====================================================
-// 인증 라우터
-// POST /api/super/login  - 슈퍼관리자 로그인
-// POST /api/admin/login  - 고객사 관리자 로그인
+// 인증 라우터 - Cloudflare D1 버전
+// POST /api/super/login    - 슈퍼관리자 로그인
+// POST /api/admin/login    - 고객사 관리자 로그인
 // PUT  /api/admin/password - 비밀번호 변경 (JWT 필요)
 // =====================================================
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
-import { createSupabaseAdmin, retrySupabase } from '../lib/supabase'
+import { dbGet, dbRun, generateId, nowISO } from '../lib/db'
 import { signJwt } from '../lib/jwt'
 import { adminAuthMiddleware } from '../middleware/auth'
 import { Bindings, Variables } from '../types'
@@ -14,502 +14,236 @@ import { Bindings, Variables } from '../types'
 const auth = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
 const LOCK_DURATION_MS = 5 * 60 * 1000  // 5분
-const MAX_FAIL = 5
-const SALT_ROUNDS = 12
+const MAX_FAIL         = 5
+const SALT_ROUNDS      = 12
 
-/** 비밀번호 규칙: 8자 이상, 영대소문자+숫자+특수문자 */
 function validatePassword(pw: string): boolean {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{8,}$/.test(pw)
 }
 
 // ─────────────────────────────────────────
-// 헬퍼: Supabase 환경변수가 실제로 설정됐는지 확인
+// D1 설정 확인 (DB 바인딩 존재 여부)
 // ─────────────────────────────────────────
-function isSupabaseConfigured(env: Bindings): boolean {
-  return (
-    !!env.SUPABASE_URL &&
-    !env.SUPABASE_URL.includes('your-project') &&
-    !!env.SUPABASE_SERVICE_KEY &&
-    !env.SUPABASE_SERVICE_KEY.includes('your_supabase')
-  )
+function isD1Configured(env: Bindings): boolean {
+  return !!env.DB
 }
-
-// ─────────────────────────────────────────
-// 로컬 테스트 계정 (Supabase 실패 시 fallback)
-// 비밀번호: Test1234! (bcrypt 해시값)
-// ─────────────────────────────────────────
-const LOCAL_TEST_ACCOUNTS = [
-  {
-    id: 'local-test-basic',
-    email: 'test@test.com',
-    password_hash: '$2b$12$KIuHQwJVZ5Nq8PwkZI2hOu8D7x4E3XGC.LXPj5dFhSf3l1CKTF3O6',
-    company_name: '테스트쇼핑몰',
-    plan: 'basic',
-    is_temp_password: false,
-    billing_day: 5,
-    subscribed_at: '2026-03-05',
-    is_active: true,
-    bot_name: 'AI상담봇',
-    widget_color: '#4F46E5',
-    greeting_message: '안녕하세요! 무엇을 도와드릴까요? 😊',
-  },
-  {
-    id: 'local-test-pro',
-    email: 'pro@test.com',
-    password_hash: '$2b$12$KIuHQwJVZ5Nq8PwkZI2hOu8D7x4E3XGC.LXPj5dFhSf3l1CKTF3O6',
-    company_name: '프로쇼핑몰',
-    plan: 'pro',
-    is_temp_password: false,
-    billing_day: 15,
-    subscribed_at: '2026-03-15',
-    is_active: true,
-    bot_name: 'Pro상담봇',
-    widget_color: '#10B981',
-    greeting_message: '안녕하세요! 프로 상담봇입니다. 😊',
-  },
-  {
-    id: 'local-test-master',
-    email: 'master@test.com',
-    password_hash: '$2b$12$KIuHQwJVZ5Nq8PwkZI2hOu8D7x4E3XGC.LXPj5dFhSf3l1CKTF3O6',
-    company_name: '마스터쇼핑몰',
-    plan: 'master',
-    is_temp_password: false,
-    billing_day: 1,
-    subscribed_at: '2026-03-01',
-    is_active: true,
-    bot_name: '마스터상담봇',
-    widget_color: '#8B5CF6',
-    greeting_message: '안녕하세요! 마스터 상담봇입니다. 😊',
-  },
-]
 
 // ─────────────────────────────────────────
 // [1] 슈퍼관리자 로그인
 // POST /api/super/login
+// 순서: D1 admins 테이블 → 로컬 fallback (D1 미설정 시)
 // ─────────────────────────────────────────
 auth.post('/super/login', async (c) => {
   let body: { email?: string; password?: string }
-  try {
-    body = await c.req.json()
-  } catch {
-    return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400)
-  }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
 
   const email    = (body.email    || '').toLowerCase().trim()
   const password = (body.password || '')
 
-  console.log('[DEBUG][super/login] 로그인 시도:', { email, passwordLength: password.length })
-
-  if (!email || !password) {
+  if (!email || !password)
     return c.json({ success: false, error: '이메일과 비밀번호를 입력하세요.' }, 400)
-  }
-
-  if (password.length > 72) {
+  if (password.length > 72)
     return c.json({ success: false, error: '비밀번호는 최대 72자까지 입력 가능합니다.' }, 400)
-  }
 
-  const jwtSecret = c.env.SUPER_JWT_SECRET || ''
-  const hasJwtSecret = jwtSecret.length >= 16 && !jwtSecret.includes('your_super')
-  const effectiveSecret = hasJwtSecret
-    ? jwtSecret
-    : 'local-dev-super-secret-key-32chars!!'
+  const jwtSecret = c.env.SUPER_JWT_SECRET || 'local-dev-super-secret-key-32chars!!'
+  const effectiveSecret = jwtSecret.length >= 16 ? jwtSecret : 'local-dev-super-secret-key-32chars!!'
 
-  // ════════════════════════════════════════════════
-  // CASE A: Supabase가 설정된 경우 → DB 조회 시도
-  //         네트워크 오류 시 CASE B(로컬 fallback)로 자동 전환
-  // ════════════════════════════════════════════════
-  if (isSupabaseConfigured(c.env)) {
-    console.log('[DEBUG][super/login] Supabase 연결 모드 시도')
-    const supabase = createSupabaseAdmin(c.env)
+  // ── CASE A: D1 사용 ──────────────────────────────────
+  if (isD1Configured(c.env)) {
+    const { data: admin, error: dbErr } = await dbGet<{
+      id: string; email: string; password: string; is_active: number
+    }>(c.env, 'SELECT id, email, password, is_active FROM admins WHERE email = ? LIMIT 1', email)
 
-    const { data: adminData, error: adminErr } = await retrySupabase(() =>
-      supabase
-        .from('admins')
-        .select('id, email, password')
-        .eq('email', email)
-        .single()
-    )
-
-    const errMsg = adminErr?.message ?? ''
-    console.log('[DEBUG][super/login] DB 조회 결과:', {
-      found: !!adminData,
-      dbError: errMsg || null,
-    })
-
-    const isNetworkErr =
-      errMsg.includes('error code: 1016') ||
-      errMsg.includes('internal error') ||
-      errMsg.includes('DNS') ||
-      errMsg.includes('fetch failed') ||
-      errMsg.includes('Failed to fetch') ||
-      errMsg.includes('network') ||
-      errMsg.includes('ENOTFOUND') ||
-      errMsg.includes('name or service not known') ||
-      errMsg.includes('upstream connect error') ||
-      errMsg.includes('connection reset') ||
-      errMsg.includes('socket hang up') ||
-      errMsg.includes('etimedout')
-
-    if (!isNetworkErr && adminData) {
-      // ✅ Supabase 조회 성공 → DB로 로그인 처리
-      const admin = adminData as { id: string; email: string; password: string }
-      let isValid = false
-      try {
-        isValid = await bcrypt.compare(password, admin.password)
-      } catch (e: any) {
-        console.error('[DEBUG][super/login] bcrypt 오류:', e.message)
-        return c.json({ success: false, error: '비밀번호 검증 중 오류가 발생했습니다.' }, 500)
-      }
-
-      console.log('[DEBUG][super/login] bcrypt.compare 결과 (DB):', isValid)
-
-      if (!isValid) {
-        return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-      }
-
-      const token = await signJwt(
-        { sub: admin.id, email: admin.email, role: 'super_admin' },
-        effectiveSecret
-      )
-      console.log('[DEBUG][super/login] ✅ 로그인 성공 (DB):', admin.email)
-      return c.json({ success: true, data: { token, admin: { id: admin.id, email: admin.email } } })
+    if (dbErr) {
+      console.error('[super/login] D1 오류:', dbErr)
+      return c.json({ success: false, error: 'DB 오류가 발생했습니다.' }, 500)
     }
-
-    if (!isNetworkErr && !adminData) {
-      // DB에 계정 없음 → 로그인 실패
+    if (!admin)
       return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-    }
+    if (!admin.is_active)
+      return c.json({ success: false, error: '비활성화된 계정입니다.' }, 403)
 
-    // isNetworkErr === true → CASE B 로컬 fallback으로 계속
-    console.warn('[DEBUG][super/login] ⚠️ Supabase 1016 오류, 로컬 fallback으로 전환')
+    const isValid = await bcrypt.compare(password, admin.password)
+    if (!isValid)
+      return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
+
+    // 마지막 로그인 시간 업데이트
+    await dbRun(c.env, 'UPDATE admins SET last_login_at = ? WHERE id = ?', nowISO(), admin.id)
+
+    const token = await signJwt({ sub: admin.id, email: admin.email, role: 'super_admin' }, effectiveSecret)
+    return c.json({ success: true, data: { token, admin: { id: admin.id, email: admin.email } } })
   }
 
-  // ════════════════════════════════════════════════
-  // CASE B: Supabase 미설정 또는 네트워크 오류
-  //         → 로컬 .dev.vars fallback
-  // ════════════════════════════════════════════════
+  // ── CASE B: D1 미설정 → 로컬 fallback ────────────────
   const localEmail  = c.env.LOCAL_SUPER_ADMIN_EMAIL    || 'super@admin.local'
   const localPwHash = c.env.LOCAL_SUPER_ADMIN_PASSWORD_HASH || ''
 
-  console.log('[DEBUG][super/login] 로컬 fallback 모드:', {
-    localEmail,
-    hasLocalHash: !!localPwHash,
-    hashPrefix: localPwHash?.substring(0, 7) ?? null,
-  })
-
-  if (!localPwHash) {
-    return c.json({
-      success: false,
-      error: 'Supabase가 설정되지 않았고, 로컬 fallback 계정도 없습니다.',
-    }, 503)
-  }
-
-  if (email !== localEmail.toLowerCase()) {
-    console.log('[DEBUG][super/login] 이메일 불일치:', { input: email, expected: localEmail.toLowerCase() })
+  if (!localPwHash)
+    return c.json({ success: false, error: 'DB가 설정되지 않았습니다. Cloudflare D1을 연결해주세요.' }, 503)
+  if (email !== localEmail.toLowerCase())
     return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-  }
 
-  let isLocalValid = false
-  try {
-    isLocalValid = await bcrypt.compare(password, localPwHash)
-  } catch (e: any) {
-    console.error('[DEBUG][super/login] bcrypt 오류 (local):', e.message)
-    return c.json({ success: false, error: '비밀번호 검증 중 오류가 발생했습니다.' }, 500)
-  }
-
-  console.log('[DEBUG][super/login] bcrypt.compare 결과 (local):', isLocalValid)
-
-  if (!isLocalValid) {
+  const isLocalValid = await bcrypt.compare(password, localPwHash)
+  if (!isLocalValid)
     return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-  }
 
   const token = await signJwt(
     { sub: 'local-super-admin', email: localEmail.toLowerCase(), role: 'super_admin' },
     effectiveSecret
   )
-
-  console.log('[DEBUG][super/login] ✅ 로그인 성공 (로컬 fallback):', localEmail)
-  return c.json({
-    success: true,
-    data: {
-      token,
-      admin: { id: 'local-super-admin', email: localEmail.toLowerCase() },
-    },
-  })
+  return c.json({ success: true, data: { token, admin: { id: 'local-super-admin', email: localEmail.toLowerCase() } } })
 })
 
 // ─────────────────────────────────────────
 // [2] 고객사 관리자 로그인
 // POST /api/admin/login
+// D1 tenants 테이블에서 조회 + 계정잠금 처리
 // ─────────────────────────────────────────
 auth.post('/admin/login', async (c) => {
   let body: { email?: string; password?: string }
-  try {
-    body = await c.req.json()
-  } catch {
-    return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400)
-  }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
 
-  const email = (body.email || '').toLowerCase().trim()
-  const password = body.password || ''
+  const email    = (body.email    || '').toLowerCase().trim()
+  const password = body.password  || ''
 
-  if (!email || !password) {
+  if (!email || !password)
     return c.json({ success: false, error: '이메일과 비밀번호를 입력하세요.' }, 400)
-  }
-
-  if (password.length > 72) {
+  if (password.length > 72)
     return c.json({ success: false, error: '비밀번호는 최대 72자까지 입력 가능합니다.' }, 400)
+
+  const adminJwtSecret    = c.env.ADMIN_JWT_SECRET || 'local-dev-admin-secret-key-32chars!'
+  const effectiveAdminSecret = adminJwtSecret.length >= 16 ? adminJwtSecret : 'local-dev-admin-secret-key-32chars!'
+
+  if (!isD1Configured(c.env))
+    return c.json({ success: false, error: 'DB가 설정되지 않았습니다. Cloudflare D1을 연결해주세요.' }, 503)
+
+  // D1 tenants 조회
+  const { data: tenant, error: dbErr } = await dbGet<{
+    id: string; email: string; password: string; company_name: string
+    plan: string; bot_name: string; widget_color: string; greeting_message: string
+    is_active: number; is_deleted: number; is_temp_password: number
+    login_fail_count: number; login_locked_until: string | null
+    billing_day: number; subscribed_at: string | null
+    faq_limit: number; chat_limit: number
+  }>(c.env,
+    `SELECT id, email, password, company_name, plan, bot_name, widget_color,
+            greeting_message, is_active, is_deleted, is_temp_password,
+            login_fail_count, login_locked_until, billing_day, subscribed_at,
+            faq_limit, chat_limit
+     FROM tenants WHERE email = ? AND is_deleted = 0 LIMIT 1`,
+    email
+  )
+
+  if (dbErr) {
+    console.error('[admin/login] D1 오류:', dbErr)
+    return c.json({ success: false, error: 'DB 오류가 발생했습니다.' }, 500)
   }
-
-  const adminJwtSecret = c.env.ADMIN_JWT_SECRET || 'local-dev-admin-secret-key-32chars!'
-  const effectiveAdminSecret = adminJwtSecret.length >= 16 && !adminJwtSecret.includes('your_admin')
-    ? adminJwtSecret
-    : 'local-dev-admin-secret-key-32chars!'
-
-  console.log('[DEBUG][admin/login] 로그인 시도:', { email })
-
-  // ════════════════════════════════════════════════
-  // CASE A: Supabase 연결 시도
-  // ════════════════════════════════════════════════
-  if (isSupabaseConfigured(c.env)) {
-    console.log('[DEBUG][admin/login] Supabase 연결 모드 시도')
-    const supabase = createSupabaseAdmin(c.env)
-
-    const { data: tenantData, error: tenantErr } = await retrySupabase(() =>
-      supabase
-        .from('tenants')
-        .select('*')
-        .eq('email', email)
-        .eq('is_deleted', false)
-        .single()
-    )
-
-    const errMsg = tenantErr?.message ?? ''
-    console.log('[DEBUG][admin/login] DB 조회 결과:', { found: !!tenantData, dbError: errMsg || null })
-
-    if (errMsg.includes('error code: 1016') || errMsg.includes('internal error') ||
-        errMsg.includes('DNS') || errMsg.includes('fetch failed') ||
-        errMsg.includes('Failed to fetch') || errMsg.includes('network') ||
-        errMsg.includes('ENOTFOUND') || errMsg.includes('name or service not known') ||
-        errMsg.includes('upstream connect error') || errMsg.includes('connection reset') ||
-        errMsg.includes('socket hang up') || errMsg.includes('etimedout')) {
-      console.error('[DEBUG][admin/login] ❌ Supabase 연결 실패 (재시도 소진):', errMsg)
-      return c.json({ success: false, error: 'Supabase 연결 실패. 잠시 후 다시 시도하세요.' }, 503)
-    }
-
-    if (!tenantData) {
-      return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-    }
-
-    const tenant = tenantData
-
-    if (!tenant.is_active) {
-      return c.json({ success: false, error: '비활성화된 계정입니다. 관리자에게 문의하세요.' }, 403)
-    }
-
-    if (tenant.login_locked_until) {
-      const lockedUntil = new Date(tenant.login_locked_until).getTime()
-      if (Date.now() < lockedUntil) {
-        const remainSec = Math.ceil((lockedUntil - Date.now()) / 1000)
-        return c.json({
-          success: false,
-          error: `로그인이 잠겼습니다. ${remainSec}초 후 다시 시도하세요.`,
-        }, 423)
-      }
-    }
-
-    const isValid = await bcrypt.compare(password, tenant.password)
-
-    if (!isValid) {
-      const newFailCount = (tenant.login_fail_count || 0) + 1
-      const updateData: Record<string, unknown> = { login_fail_count: newFailCount }
-
-      if (newFailCount >= MAX_FAIL) {
-        updateData.login_locked_until = new Date(Date.now() + LOCK_DURATION_MS).toISOString()
-        updateData.login_fail_count = 0
-        await retrySupabase(() => supabase.from('tenants').update(updateData).eq('id', tenant.id))
-        return c.json({
-          success: false,
-          error: `비밀번호 ${MAX_FAIL}회 오류로 5분간 잠겼습니다.`,
-        }, 423)
-      }
-
-      await retrySupabase(() => supabase.from('tenants').update(updateData).eq('id', tenant.id))
-      return c.json({
-        success: false,
-        error: `비밀번호가 올바르지 않습니다. (${newFailCount}/${MAX_FAIL})`,
-      }, 401)
-    }
-
-    await retrySupabase(() =>
-      supabase
-        .from('tenants')
-        .update({ login_fail_count: 0, login_locked_until: null })
-        .eq('id', tenant.id)
-    )
-
-    const token = await signJwt(
-      { sub: tenant.id, email: tenant.email, role: 'tenant_admin' },
-      effectiveAdminSecret
-    )
-
-    console.log('[DEBUG][admin/login] ✅ 로그인 성공 (DB):', tenant.email)
-    return c.json({
-      success: true,
-      data: {
-        token,
-        tenant: {
-          id: tenant.id,
-          company_name: tenant.company_name,
-          email: tenant.email,
-          plan: tenant.plan,
-          bot_name: tenant.bot_name,
-          widget_color: tenant.widget_color,
-          greeting_message: tenant.greeting_message,
-          is_temp_password: tenant.is_temp_password || false,
-          billing_day: tenant.billing_day || 1,
-          subscribed_at: tenant.subscribed_at || null,
-        },
-      },
-    })
-  }
-
-  // ════════════════════════════════════════════════
-  // CASE B: Supabase 미설정 → 로컬 테스트 계정 fallback
-  // ════════════════════════════════════════════════
-  console.log('[DEBUG][admin/login] 로컬 테스트 계정 fallback 시도:', email)
-
-  const localAccount = LOCAL_TEST_ACCOUNTS.find(a => a.email === email)
-  if (!localAccount) {
+  if (!tenant)
     return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
-  }
+  if (!tenant.is_active)
+    return c.json({ success: false, error: '비활성화된 계정입니다. 관리자에게 문의하세요.' }, 403)
 
-  let isLocalValid = false
-  try {
-    if (password === 'Test1234!') {
-      isLocalValid = true
-    } else {
-      isLocalValid = await bcrypt.compare(password, localAccount.password_hash)
+  // 계정 잠금 확인
+  if (tenant.login_locked_until) {
+    const lockedUntil = new Date(tenant.login_locked_until).getTime()
+    if (Date.now() < lockedUntil) {
+      const remainSec = Math.ceil((lockedUntil - Date.now()) / 1000)
+      return c.json({ success: false, error: `로그인이 잠겼습니다. ${remainSec}초 후 다시 시도하세요.` }, 423)
     }
-  } catch (e: any) {
-    console.error('[DEBUG][admin/login] bcrypt 오류 (local):', e.message)
-    isLocalValid = (password === 'Test1234!')
   }
 
-  if (!isLocalValid) {
-    return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
+  // 비밀번호 검증
+  const isValid = await bcrypt.compare(password, tenant.password)
+
+  if (!isValid) {
+    const newFailCount = (tenant.login_fail_count || 0) + 1
+    if (newFailCount >= MAX_FAIL) {
+      const lockedUntil = new Date(Date.now() + LOCK_DURATION_MS).toISOString()
+      await dbRun(c.env,
+        'UPDATE tenants SET login_fail_count = 0, login_locked_until = ?, updated_at = ? WHERE id = ?',
+        lockedUntil, nowISO(), tenant.id
+      )
+      return c.json({ success: false, error: `비밀번호 ${MAX_FAIL}회 오류로 5분간 잠겼습니다.` }, 423)
+    }
+    await dbRun(c.env,
+      'UPDATE tenants SET login_fail_count = ?, updated_at = ? WHERE id = ?',
+      newFailCount, nowISO(), tenant.id
+    )
+    return c.json({ success: false, error: `비밀번호가 올바르지 않습니다. (${newFailCount}/${MAX_FAIL})` }, 401)
   }
+
+  // 로그인 성공 → 실패 카운트 초기화
+  await dbRun(c.env,
+    'UPDATE tenants SET login_fail_count = 0, login_locked_until = NULL, updated_at = ? WHERE id = ?',
+    nowISO(), tenant.id
+  )
 
   const token = await signJwt(
-    { sub: localAccount.id, email: localAccount.email, role: 'tenant_admin' },
+    { sub: tenant.id, email: tenant.email, role: 'tenant_admin' },
     effectiveAdminSecret
   )
 
-  console.log('[DEBUG][admin/login] ✅ 로그인 성공 (로컬 테스트 계정):', localAccount.email)
   return c.json({
     success: true,
     data: {
       token,
       tenant: {
-        id: localAccount.id,
-        company_name: localAccount.company_name,
-        email: localAccount.email,
-        plan: localAccount.plan,
-        bot_name: localAccount.bot_name,
-        widget_color: localAccount.widget_color,
-        greeting_message: localAccount.greeting_message,
-        is_temp_password: localAccount.is_temp_password,
-        billing_day: localAccount.billing_day,
-        subscribed_at: localAccount.subscribed_at,
+        id:               tenant.id,
+        company_name:     tenant.company_name,
+        email:            tenant.email,
+        plan:             tenant.plan,
+        bot_name:         tenant.bot_name,
+        widget_color:     tenant.widget_color,
+        greeting_message: tenant.greeting_message,
+        is_temp_password: !!tenant.is_temp_password,
+        billing_day:      tenant.billing_day || 1,
+        subscribed_at:    tenant.subscribed_at || null,
+        faq_limit:        tenant.faq_limit,
+        chat_limit:       tenant.chat_limit,
       },
     },
   })
 })
 
 // ─────────────────────────────────────────
-// [3] 비밀번호 변경 (JWT 필요)
+// [3] 비밀번호 변경
 // PUT /api/admin/password
 // ─────────────────────────────────────────
 auth.put('/admin/password', adminAuthMiddleware, async (c) => {
   let body: { current_password?: string; new_password?: string }
-  try {
-    body = await c.req.json()
-  } catch {
-    return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400)
-  }
+  try { body = await c.req.json() }
+  catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
 
   const { current_password, new_password } = body
-  if (!current_password || !new_password) {
+  if (!current_password || !new_password)
     return c.json({ success: false, error: '현재/새 비밀번호를 모두 입력하세요.' }, 400)
-  }
-
-  if (!validatePassword(new_password)) {
-    return c.json({
-      success: false,
-      error: '새 비밀번호는 8자 이상이며 영대소문자, 숫자, 특수문자를 포함해야 합니다.',
-    }, 400)
-  }
+  if (!validatePassword(new_password))
+    return c.json({ success: false, error: '새 비밀번호는 8자 이상이며 영대소문자, 숫자, 특수문자를 포함해야 합니다.' }, 400)
 
   const tenantId = c.get('tenantId')!
 
-  const isLocalAccount = LOCAL_TEST_ACCOUNTS.some(a => a.id === tenantId)
-  if (isLocalAccount || !isSupabaseConfigured(c.env)) {
-    const localAcc = LOCAL_TEST_ACCOUNTS.find(a => a.id === tenantId)
-    if (localAcc && current_password !== 'Test1234!') {
-      try {
-        const valid = await bcrypt.compare(current_password, localAcc.password_hash)
-        if (!valid && current_password !== 'Test1234!') {
-          return c.json({ success: false, error: '현재 비밀번호가 올바르지 않습니다.' }, 400)
-        }
-      } catch { /* 직접 비교로 fallback */ }
-    }
-    return c.json({ success: true, message: '비밀번호가 성공적으로 변경되었습니다.' })
-  }
-
-  const supabase = createSupabaseAdmin(c.env)
-
-  const { data: tenantPw, error: pwErr } = await retrySupabase(() =>
-    supabase
-      .from('tenants')
-      .select('password')
-      .eq('id', tenantId)
-      .single()
+  const { data: tenant, error: dbErr } = await dbGet<{ id: string; password: string }>(
+    c.env,
+    'SELECT id, password FROM tenants WHERE id = ? LIMIT 1',
+    tenantId
   )
-
-  const errMsg2 = pwErr?.message ?? ''
-  if (errMsg2.includes('error code: 1016') || errMsg2.includes('internal error') ||
-      errMsg2.includes('fetch failed') || errMsg2.includes('DNS') ||
-      errMsg2.includes('network') || errMsg2.includes('name or service not known')) {
-    return c.json({ success: false, error: 'Supabase 연결 실패. 잠시 후 다시 시도하세요.' }, 503)
-  }
-
-  if (!tenantPw || pwErr) {
+  if (dbErr || !tenant)
     return c.json({ success: false, error: '사용자를 찾을 수 없습니다.' }, 404)
-  }
-
-  const tenant = tenantPw as { password: string }
 
   const isCurrentValid = await bcrypt.compare(current_password, tenant.password)
-  if (!isCurrentValid) {
+  if (!isCurrentValid)
     return c.json({ success: false, error: '현재 비밀번호가 올바르지 않습니다.' }, 400)
-  }
 
   const isSame = await bcrypt.compare(new_password, tenant.password)
-  if (isSame) {
+  if (isSame)
     return c.json({ success: false, error: '새 비밀번호는 현재 비밀번호와 달라야 합니다.' }, 400)
-  }
 
   const hashed = await bcrypt.hash(new_password, SALT_ROUNDS)
-
-  await retrySupabase(() =>
-    supabase
-      .from('tenants')
-      .update({
-        password: hashed,
-        is_temp_password: false,
-        password_changed_at: new Date().toISOString(),
-      })
-      .eq('id', tenantId)
+  await dbRun(c.env,
+    'UPDATE tenants SET password = ?, is_temp_password = 0, password_changed_at = ?, updated_at = ? WHERE id = ?',
+    hashed, nowISO(), nowISO(), tenantId
   )
 
   return c.json({ success: true, message: '비밀번호가 성공적으로 변경되었습니다.' })

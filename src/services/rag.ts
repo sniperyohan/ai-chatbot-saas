@@ -1,10 +1,12 @@
 // =====================================================
-// RAG (Retrieval-Augmented Generation) 서비스
-// - Supabase RPC match_documents 호출 (fetch 직접)
+// RAG (Retrieval-Augmented Generation) 서비스 - D1 버전
+// - D1에서 FAQ 문서 검색 (embedding 유사도 계산)
 // - processMessage: 전체 RAG 파이프라인
 // - Cloudflare Workers 호환 (node-fetch 금지)
 // =====================================================
 import { generateQueryEmbedding, generateAnswer } from './gemini'
+import { dbGet, dbAll, dbRun, generateId } from '../lib/db'
+import { Bindings } from '../types'
 
 const MATCH_THRESHOLD = 0.7
 const MATCH_COUNT     = 3
@@ -28,44 +30,66 @@ export interface ProcessMessageResult {
 }
 
 // ─────────────────────────────────────────
-// 1. 유사 문서 검색 (Supabase RPC - fetch 직접)
+// 1. 코사인 유사도 계산
+// ─────────────────────────────────────────
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (!a || !b || a.length !== b.length) return 0
+  let dot = 0, normA = 0, normB = 0
+  for (let i = 0; i < a.length; i++) {
+    dot   += a[i] * b[i]
+    normA += a[i] * a[i]
+    normB += b[i] * b[i]
+  }
+  if (normA === 0 || normB === 0) return 0
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB))
+}
+
+// ─────────────────────────────────────────
+// 2. D1에서 유사 문서 검색
 // ─────────────────────────────────────────
 export async function searchSimilarDocuments(
   tenantId: string,
   queryEmbedding: number[],
-  supabaseUrl: string,
-  supabaseKey: string,
+  env: Bindings,
   limit: number = MATCH_COUNT
 ): Promise<MatchedDocument[]> {
-  const url = `${supabaseUrl}/rest/v1/rpc/match_documents`
+  try {
+    // 임베딩이 있는 활성 FAQ 전체 조회
+    const { data: docs } = await dbAll<{
+      id: string; question: string; answer: string; category: string; embedding: string
+    }>(env,
+      `SELECT id, question, answer, category, embedding
+       FROM documents
+       WHERE tenant_id = ? AND is_active = 1 AND is_deleted = 0 AND embedding IS NOT NULL
+       LIMIT 500`,
+      tenantId
+    )
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': supabaseKey,
-      'Authorization': `Bearer ${supabaseKey}`,
-    },
-    body: JSON.stringify({
-      query_embedding: queryEmbedding,
-      match_tenant_id: tenantId,
-      match_threshold: MATCH_THRESHOLD,
-      match_count: limit,
-    }),
-  })
+    if (!docs || docs.length === 0) return []
 
-  if (!res.ok) {
-    const errText = await res.text()
-    console.error('[rag] searchSimilarDocuments error:', res.status, errText)
+    // 코사인 유사도 계산 후 정렬
+    const scored = docs
+      .map(doc => {
+        let docEmbedding: number[] = []
+        try { docEmbedding = JSON.parse(doc.embedding) } catch {}
+        const similarity = cosineSimilarity(queryEmbedding, docEmbedding)
+        return { ...doc, similarity }
+      })
+      .filter(doc => doc.similarity >= MATCH_THRESHOLD)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit)
+
+    return scored.map(({ id, question, answer, category, similarity }) => ({
+      id, question, answer, category, similarity,
+    }))
+  } catch (e) {
+    console.error('[rag] searchSimilarDocuments D1 error:', e)
     return []
   }
-
-  const docs = (await res.json()) as MatchedDocument[]
-  return Array.isArray(docs) ? docs : []
 }
 
 // ─────────────────────────────────────────
-// 2. 운영시간 체크 (KST)
+// 3. 운영시간 체크 (KST)
 // ─────────────────────────────────────────
 function isWithinBusinessHours(businessHours: any): boolean {
   if (!businessHours || typeof businessHours !== 'object') return true
@@ -90,38 +114,26 @@ function isWithinBusinessHours(businessHours: any): boolean {
 }
 
 // ─────────────────────────────────────────
-// 3. 의도 분류 (키워드 기반 - API 호출 없음)
+// 4. 의도 분류 (키워드 기반)
 // ─────────────────────────────────────────
 function classifyIntent(
   userMessage: string,
   matchedDocs: MatchedDocument[]
 ): string {
   const msg = userMessage.toLowerCase()
-
-  // 인사말
   if (/^(안녕|hello|hi|반가|처음|방가|ㅎㅇ|안뇽)/.test(msg)) return 'GREETING'
-
-  // 주문/배송
   if (/(주문|배송|배달|운송장|택배|도착|출고|발송|언제|조회)/.test(msg)) return 'ORDER_INQUIRY'
-
-  // 불만/환불
   if (/(환불|취소|불만|항의|화가|짜증|불편|이상|고장|환급|반품|교환)/.test(msg)) return 'COMPLAINT'
-
-  // 결제
   if (/(결제|카드|계좌|이체|입금|영수증|세금계산서)/.test(msg)) return 'PAYMENT'
-
-  // FAQ 매칭됨
   if (matchedDocs.length > 0) return 'FAQ_INQUIRY'
-
   return 'OTHER'
 }
 
 // ─────────────────────────────────────────
-// 4. chat_logs 저장 (fetch 직접)
+// 5. chat_logs D1 저장
 // ─────────────────────────────────────────
 async function saveChatLog(
-  supabaseUrl: string,
-  supabaseKey: string,
+  env: Bindings,
   log: {
     tenant_id: string
     session_id: string
@@ -134,72 +146,68 @@ async function saveChatLog(
   }
 ): Promise<void> {
   try {
-    // KST 타임스탬프
-    const now = new Date()
-    const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000)
-
-    await fetch(`${supabaseUrl}/rest/v1/chat_logs`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-        'Prefer': 'return=minimal',
-      },
-      body: JSON.stringify({
-        ...log,
-        created_at: kst.toISOString().replace('Z', '+09:00'),
-      }),
-    })
+    await dbRun(env,
+      `INSERT INTO chat_logs
+        (id, tenant_id, session_id, user_message, bot_response, bot_answer,
+         channel, intent, detected_language, response_time_ms, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      generateId(), log.tenant_id, log.session_id,
+      log.user_message, log.bot_response, log.bot_response,
+      log.channel, log.intent, 'ko',
+      log.response_time, new Date().toISOString()
+    )
   } catch (e) {
-    console.error('[rag] saveChatLog error:', e)
+    console.error('[rag] saveChatLog D1 error:', e)
   }
 }
 
 // ─────────────────────────────────────────
-// 5. 테넌트 봇 설정 조회 (fetch 직접)
+// 6. 테넌트 봇 설정 조회 (D1)
 // ─────────────────────────────────────────
-async function getTenantSettings(
-  tenantId: string,
-  supabaseUrl: string,
-  supabaseKey: string
-): Promise<any | null> {
+async function getTenantSettings(tenantId: string, env: Bindings): Promise<any | null> {
   try {
-    const res = await fetch(
-      `${supabaseUrl}/rest/v1/tenants?id=eq.${tenantId}&is_deleted=eq.false&select=id,is_active,bot_name,greeting_message,fallback_message,system_prompt,response_tone,max_response_length,business_hours_enabled,business_hours,off_hours_message`,
-      {
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-        },
-      }
+    const { data } = await dbGet<{
+      id: string; is_active: number; bot_name: string; greeting_message: string
+      fallback_message: string; system_prompt: string; response_tone: string
+      max_response_length: number; business_hours_enabled: number
+      business_hours: string; off_hours_message: string
+    }>(env,
+      `SELECT id, is_active, bot_name, greeting_message, fallback_message,
+              system_prompt, response_tone, max_response_length,
+              business_hours_enabled, business_hours, off_hours_message
+       FROM tenants WHERE id = ? AND is_deleted = 0 LIMIT 1`,
+      tenantId
     )
-    if (!res.ok) return null
-    const rows = (await res.json()) as any[]
-    return rows[0] || null
-  } catch {
+    if (!data) return null
+
+    // JSON 파싱
+    let businessHours: any = {}
+    try { businessHours = JSON.parse(data.business_hours || '{}') } catch {}
+
+    return {
+      ...data,
+      is_active: !!data.is_active,
+      business_hours_enabled: !!data.business_hours_enabled,
+      business_hours: businessHours,
+    }
+  } catch (e) {
+    console.error('[rag] getTenantSettings D1 error:', e)
     return null
   }
 }
 
 // ─────────────────────────────────────────
-// 6. 메인 RAG 파이프라인
+// 7. 메인 RAG 파이프라인 (D1 버전)
 // ─────────────────────────────────────────
 export async function processMessage(
   tenantId: string,
   userMessage: string,
   channel: string,
   sessionId: string,
-  env: {
-    GEMINI_API_KEY: string
-    SUPABASE_URL: string
-    SUPABASE_SERVICE_KEY: string
-  }
+  env: Bindings
 ): Promise<ProcessMessageResult> {
   const startTime = Date.now()
 
-  const supabaseUrl = env.SUPABASE_URL
-  const supabaseKey = env.SUPABASE_SERVICE_KEY
   const fallbackResult = (answer: string): ProcessMessageResult => ({
     answer,
     intent: 'OTHER',
@@ -208,14 +216,10 @@ export async function processMessage(
   })
 
   // ── Step 1: 테넌트 설정 조회 ──────────────────────
-  const tenant = await getTenantSettings(tenantId, supabaseUrl, supabaseKey)
+  const tenant = await getTenantSettings(tenantId, env)
 
-  if (!tenant) {
-    return fallbackResult('존재하지 않는 서비스입니다.')
-  }
-  if (!tenant.is_active) {
-    return fallbackResult('현재 서비스가 중단된 상태입니다.')
-  }
+  if (!tenant) return fallbackResult('존재하지 않는 서비스입니다.')
+  if (!tenant.is_active) return fallbackResult('현재 서비스가 중단된 상태입니다.')
 
   const fallbackMsg = tenant.fallback_message || '죄송합니다. 잘 이해하지 못했습니다. 담당자에게 문의해주세요.'
 
@@ -224,14 +228,10 @@ export async function processMessage(
     const isOpen = isWithinBusinessHours(tenant.business_hours)
     if (!isOpen) {
       const offMsg = tenant.off_hours_message || '현재 운영시간이 아닙니다. 운영시간에 다시 문의해 주세요.'
-      await saveChatLog(supabaseUrl, supabaseKey, {
-        tenant_id: tenantId,
-        session_id: sessionId,
-        user_message: userMessage,
-        bot_response: offMsg,
-        intent: 'OTHER',
-        channel,
-        is_answered: false,
+      await saveChatLog(env, {
+        tenant_id: tenantId, session_id: sessionId,
+        user_message: userMessage, bot_response: offMsg,
+        intent: 'OTHER', channel, is_answered: false,
         response_time: Date.now() - startTime,
       })
       return { answer: offMsg, intent: 'OTHER', isAnswered: false, responseTime: Date.now() - startTime }
@@ -239,61 +239,46 @@ export async function processMessage(
   }
 
   try {
-    // ── Step 3: 질문 벡터화 (RETRIEVAL_QUERY) ────────
-    let queryEmbedding: number[]
+    // ── Step 3: 질문 벡터화 ────────────────────────────
+    let queryEmbedding: number[] = []
     try {
       queryEmbedding = await generateQueryEmbedding(userMessage, env)
     } catch (e) {
       console.error('[rag] generateQueryEmbedding error:', e)
-      // 임베딩 실패 시 컨텍스트 없이 답변 생성
-      queryEmbedding = []
     }
 
-    // ── Step 4: 유사 FAQ 검색 (threshold 0.7) ────────
+    // ── Step 4: 유사 FAQ 검색 ─────────────────────────
     let matchedDocs: MatchedDocument[] = []
     if (queryEmbedding.length > 0) {
       try {
-        matchedDocs = await searchSimilarDocuments(
-          tenantId,
-          queryEmbedding,
-          supabaseUrl,
-          supabaseKey,
-          MATCH_COUNT
-        )
+        matchedDocs = await searchSimilarDocuments(tenantId, queryEmbedding, env, MATCH_COUNT)
       } catch (e) {
         console.error('[rag] searchSimilarDocuments error:', e)
       }
     }
 
-    // ── Step 5: 컨텍스트 구성 (최대 3개) ─────────────
+    // ── Step 5: 컨텍스트 구성 ─────────────────────────
     const context = matchedDocs.length > 0
       ? matchedDocs
           .slice(0, 3)
-          .map((doc, i) =>
-            `[FAQ ${i + 1}]\n질문: ${doc.question}\n답변: ${doc.answer}`
-          )
+          .map((doc, i) => `[FAQ ${i + 1}]\n질문: ${doc.question}\n답변: ${doc.answer}`)
           .join('\n\n')
       : ''
 
     // ── Step 6: 최종 답변 생성 ────────────────────────
     const answer = await generateAnswer(userMessage, context, tenant, env)
 
-    // ── Step 7: 의도 분류 (키워드 기반) ──────────────
+    // ── Step 7: 의도 분류 ─────────────────────────────
     const intent = classifyIntent(userMessage, matchedDocs)
 
-    const isAnswered = matchedDocs.length > 0 || answer.length > 0
-    const responseTime = Date.now() - startTime
+    const isAnswered    = matchedDocs.length > 0 || answer.length > 0
+    const responseTime  = Date.now() - startTime
 
     // ── Step 8: chat_logs 저장 ────────────────────────
-    await saveChatLog(supabaseUrl, supabaseKey, {
-      tenant_id: tenantId,
-      session_id: sessionId,
-      user_message: userMessage,
-      bot_response: answer,
-      intent,
-      channel,
-      is_answered: isAnswered,
-      response_time: responseTime,
+    await saveChatLog(env, {
+      tenant_id: tenantId, session_id: sessionId,
+      user_message: userMessage, bot_response: answer,
+      intent, channel, is_answered: isAnswered, response_time: responseTime,
     })
 
     return { answer, intent, isAnswered, responseTime }

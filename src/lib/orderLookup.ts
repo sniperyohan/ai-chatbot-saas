@@ -1,9 +1,10 @@
 // =====================================================
 // 주문 조회 플로우 (카페24 / 스마트스토어 / 아임웹 / 고도몰)
 // =====================================================
-import { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from './crypto'
 import { maskPhone, maskOrderId } from './crypto'
+import { dbGet } from './db'
+import { Bindings } from '../types'
 
 export interface OrderQueryParams {
   tenantId: string
@@ -40,45 +41,40 @@ const ORDER_INQUIRY_PROMPT = `주문 조회를 위해 아래 중 하나를 알�
 
 /** 주문 조회 진입점 */
 export async function handleOrderInquiry(
-  supabase: SupabaseClient,
+  env: Bindings,
   encKey: string,
   tenantId: string,
   channel: string
 ): Promise<string> {
-  // 연동 설정 확인
-  const { data: integration } = await supabase
-    .from('tenant_api_integrations')
-    .select('*')
-    .eq('tenant_id', tenantId)
-    .eq('is_active', true)
-    .single()
-
-  if (!integration) {
-    return '주문 조회는 마이페이지에서 확인해주세요.'
-  }
-
+  const { data: integration } = await dbGet<{ id: string }>(env,
+    'SELECT id FROM integrations WHERE tenant_id = ? AND is_active = 1 LIMIT 1', tenantId
+  )
+  if (!integration) return '주문 조회는 마이페이지에서 확인해주세요.'
   return ORDER_INQUIRY_PROMPT
 }
 
 /** 실제 주문 조회 실행 */
 export async function lookupOrder(
-  supabase: SupabaseClient,
+  env: Bindings,
   encKey: string,
   params: OrderQueryParams
 ): Promise<OrderResult> {
-  const { data: integration, error } = await supabase
-    .from('tenant_api_integrations')
-    .select('*')
-    .eq('tenant_id', params.tenantId)
-    .eq('is_active', true)
-    .single()
+  const { data: integration } = await dbGet<{
+    platform_name: string; api_key: string | null; api_secret: string | null
+    shop_id: string | null; access_token: string | null; is_active: number
+  }>(env,
+    'SELECT platform_name, api_key, api_secret, shop_id, access_token, is_active FROM integrations WHERE tenant_id = ? AND is_active = 1 LIMIT 1',
+    params.tenantId
+  )
 
-  if (error || !integration) {
-    return { found: false, message: '주문 조회 서비스가 연동되지 않았습니다.' }
-  }
+  if (!integration) return { found: false, message: '주문 조회 서비스가 연동되지 않았습니다.' }
 
   // API 키 복호화
-  const decrypted: PlatformIntegration = { ...integration }
+  const decrypted: PlatformIntegration = {
+    platform_name: integration.platform_name,
+    shop_id: integration.shop_id || undefined,
+    is_active: !!integration.is_active,
+  }
   if (integration.api_key) {
     try { decrypted.api_key = await decrypt(integration.api_key, encKey) } catch { /* pass */ }
   }
@@ -92,43 +88,17 @@ export async function lookupOrder(
   let result: OrderResult
   try {
     switch (integration.platform_name) {
-      case 'cafe24':
-        result = await queryCafe24(decrypted, params)
-        break
-      case 'smartstore':
-        result = await querySmartstore(decrypted, params)
-        break
-      case 'imweb':
-        result = await queryImweb(decrypted, params)
-        break
-      case 'godomall':
-        result = await queryGodomall(decrypted, params)
-        break
-      case 'custom':
-        result = await queryCustomApi(decrypted, params)
-        break
-      default:
-        result = { found: false, message: '지원하지 않는 플랫폼입니다.' }
+      case 'cafe24':      result = await queryCafe24(decrypted, params);      break
+      case 'smartstore':  result = await querySmartstore(decrypted, params);  break
+      case 'imweb':       result = await queryImweb(decrypted, params);       break
+      case 'godomall':    result = await queryGodomall(decrypted, params);    break
+      case 'custom':      result = await queryCustomApi(decrypted, params);   break
+      default:            result = { found: false, message: '지원하지 않는 플랫폼입니다.' }
     }
   } catch (e) {
     console.error('Order lookup error:', e)
     result = { found: false, message: '주문 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' }
   }
-
-  // 주문 조회 로그 저장 (마스킹 처리)
-  const maskedValue =
-    params.queryType === 'phone'
-      ? maskPhone(params.queryValue)
-      : maskOrderId(params.queryValue)
-
-  await supabase.from('order_query_logs').insert({
-    tenant_id: params.tenantId,
-    channel: params.channel,
-    query_type: params.queryType,
-    query_value: maskedValue,
-    platform_name: integration.platform_name,
-    result_status: result.found ? 'found' : 'not_found',
-  })
 
   return result
 }

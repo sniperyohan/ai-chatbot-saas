@@ -45,31 +45,14 @@ app.get('/api/health', (c) => {
   })
 })
 
-// Supabase 연결 진단 (관리자용)
-app.get('/api/health/supabase', async (c) => {
-  const supabaseUrl = c.env.SUPABASE_URL || ''
-  const supabaseKey = c.env.SUPABASE_SERVICE_KEY || ''
-
-  if (!supabaseUrl || supabaseUrl.includes('your-project')) {
-    return c.json({ status: 'not_configured', message: 'SUPABASE_URL 미설정' })
+// D1 연결 진단 (관리자용)
+app.get('/api/health/db', async (c) => {
+  if (!c.env.DB) {
+    return c.json({ status: 'not_configured', message: 'D1 DB 바인딩 미설정' })
   }
-
   try {
-    const res = await fetch(`${supabaseUrl}/rest/v1/`, {
-      method: 'GET',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-      },
-      // @ts-ignore
-      cache: 'no-store',
-    })
-    const text = await res.text()
-    return c.json({
-      status: res.ok ? 'connected' : 'error',
-      http_status: res.status,
-      body_preview: text.substring(0, 200),
-    })
+    const result = await c.env.DB.prepare('SELECT 1 as ok').first<{ ok: number }>()
+    return c.json({ status: result?.ok === 1 ? 'connected' : 'error', message: 'D1 연결 정상' })
   } catch (e: any) {
     return c.json({ status: 'failed', error: e.message })
   }

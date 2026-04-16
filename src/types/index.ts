@@ -3,16 +3,17 @@
 // =====================================================
 
 export type Bindings = {
-  GEMINI_API_KEY: string
-  SUPABASE_URL: string
-  SUPABASE_ANON_KEY: string
-  SUPABASE_SERVICE_KEY: string
+  // Cloudflare D1 Database
+  DB: D1Database
+  // JWT
   SUPER_JWT_SECRET: string
   ADMIN_JWT_SECRET: string
+  // 외부 서비스
+  GEMINI_API_KEY: string
   RESEND_API_KEY: string
   ENCRYPTION_KEY: string
   ALLOWED_ORIGINS: string
-  // 로컬 개발용 fallback (Supabase 미설정 시)
+  // 로컬 개발용 슈퍼관리자 fallback
   LOCAL_SUPER_ADMIN_EMAIL?: string
   LOCAL_SUPER_ADMIN_PASSWORD_HASH?: string
 }
