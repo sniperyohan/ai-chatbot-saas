@@ -12,7 +12,7 @@
 // =====================================================
 import { Hono } from 'hono'
 import { dbGet, dbAll, dbRun, generateId, nowISO } from '../lib/db'
-import { generateEmbedding, refineDocument } from '../services/gemini'
+import { generateEmbedding, refineDocument, generateSimilarQuestions } from '../services/gemini'
 import { adminAuthMiddleware } from '../middleware/auth'
 import { Bindings, Variables } from '../types'
 
@@ -21,6 +21,38 @@ documents.use('*', adminAuthMiddleware)
 
 // 플랜별 FAQ 한도
 const PLAN_LIMIT: Record<string, number> = { basic: 50, pro: 200, master: -1 }
+
+// ─────────────────────────────────────────
+// 카테고리 유효성 검증 헬퍼
+// categories 테이블 기반으로 유효한 카테고리인지 확인
+// 없으면 '일반'으로 폴백
+// ─────────────────────────────────────────
+async function validateCategory(
+  env: any,
+  tenantId: string,
+  categoryName: string | undefined
+): Promise<{ valid: boolean; name: string; error?: string }> {
+  const name = categoryName?.trim() || '일반'
+
+  const { data } = await dbGet<{ id: string }>(env,
+    `SELECT id FROM categories WHERE tenant_id = ? AND name = ? AND is_active = 1`,
+    tenantId, name
+  )
+
+  if (!data) {
+    // 요청한 카테고리가 없으면 '일반'으로 폴백
+    const { data: fallback } = await dbGet<{ id: string }>(env,
+      `SELECT id FROM categories WHERE tenant_id = ? AND name = '일반' AND is_active = 1`,
+      tenantId
+    )
+    if (!fallback) {
+      return { valid: false, name: '일반', error: `카테고리 '${name}'이(가) 존재하지 않습니다.` }
+    }
+    return { valid: true, name: '일반' }
+  }
+
+  return { valid: true, name }
+}
 
 // ─────────────────────────────────────────
 // [1] FAQ AI 다듬기
@@ -70,36 +102,46 @@ documents.post('/bulk-embed', async (c) => {
     refined_question: string; refined_answer: string
   }>(c.env,
     `SELECT id, question, answer, original_question, original_answer, refined_question, refined_answer
-     FROM documents WHERE tenant_id = ? AND is_active = 1 AND is_deleted = 0 AND embedding IS NULL LIMIT 100`,
+     FROM documents WHERE tenant_id = ? AND is_active = 1 AND is_deleted = 0 AND embedding IS NULL LIMIT 20`,
     tenantId
   )
 
   if (fetchErr) return c.json({ success: false, error: fetchErr }, 500)
 
-  const total    = docs?.length || 0
-  let processed  = 0
-  let failed     = 0
+  const total   = docs?.length || 0
+  let processed = 0
+  let failed    = 0
+  const errors: string[] = []
 
-  for (const doc of (docs || [])) {
-    const q    = doc.refined_question || doc.original_question || doc.question || ''
-    const a    = doc.refined_answer   || doc.original_answer   || doc.answer   || ''
-    const text = `${q}\n${a}`.trim()
+  const BATCH = 3
+  const list  = docs || []
 
-    if (!text) { failed++; continue }
+  for (let i = 0; i < list.length; i += BATCH) {
+    const batch = list.slice(i, i + BATCH)
 
-    try {
-      const embedding = await generateEmbedding(text, c.env)
-      const { error: updateErr } = await dbRun(c.env,
-        'UPDATE documents SET embedding = ?, updated_at = ? WHERE id = ? AND tenant_id = ?',
-        JSON.stringify(embedding), nowISO(), doc.id, tenantId
-      )
-      if (updateErr) { failed++ } else { processed++ }
-    } catch (e) {
-      console.error('[documents] bulk-embed error:', doc.id, e)
-      failed++
-    }
+    await Promise.all(batch.map(async (doc) => {
+      const q = doc.refined_question || doc.original_question || doc.question || ''
 
-    await new Promise(r => setTimeout(r, 100))
+      if (!q.trim()) { failed++; return }
+
+      try {
+        const embedding = await generateEmbedding(q, c.env)
+        const { error: updateErr } = await dbRun(c.env,
+          'UPDATE documents SET embedding = ?, updated_at = ? WHERE id = ? AND tenant_id = ?',
+          JSON.stringify(embedding), nowISO(), doc.id, tenantId
+        )
+        if (updateErr) {
+          failed++
+          errors.push(`${doc.id}: DB update error - ${updateErr}`)
+        } else {
+          processed++
+        }
+      } catch (e: any) {
+        failed++
+        errors.push(`${doc.id}: ${e?.message || String(e)}`)
+        console.error('[documents] bulk-embed error:', doc.id, e)
+      }
+    }))
   }
 
   return c.json({
@@ -107,6 +149,7 @@ documents.post('/bulk-embed', async (c) => {
     data: {
       processed, total, failed,
       message: `${total}개 중 ${processed}개 임베딩 완료${failed > 0 ? `, ${failed}개 실패` : ''}`,
+      errors: errors.length > 0 ? errors : undefined,
     },
   })
 })
@@ -129,10 +172,13 @@ documents.post('/', async (c) => {
 
   const question = body.question || body.refined_question || body.original_question || ''
   const answer   = body.answer   || body.refined_answer   || body.original_answer   || ''
-  const category = body.category || '일반'
 
   if (!question.trim() || !answer.trim())
     return c.json({ success: false, error: '질문과 답변을 입력하세요.' }, 400)
+
+  // 카테고리 검증 (categories 테이블 기반)
+  const catResult = await validateCategory(c.env, tenantId, body.category)
+  const category  = catResult.name
 
   // 플랜 FAQ 한도 체크
   const { data: tenantRow } = await dbGet<{ plan: string }>(c.env,
@@ -176,25 +222,27 @@ documents.post('/', async (c) => {
 
   if (insertErr) return c.json({ success: false, error: `FAQ 저장 실패: ${insertErr}` }, 500)
 
-  // 비동기 임베딩 (저장 성공 후, 실패해도 FAQ 등록은 유지)
-  ;(async () => {
-    try {
-      const text      = `${question.trim()}\n${answer.trim()}`
-      const embedding = await generateEmbedding(text, c.env)
-      await dbRun(c.env,
-        'UPDATE documents SET embedding = ?, updated_at = ? WHERE id = ? AND tenant_id = ?',
-        JSON.stringify(embedding), nowISO(), docId, tenantId
-      )
-    } catch (e) {
-      console.error('[documents] async embedding error for doc:', docId, e)
-    }
-  })()
+  // 임베딩 생성 (질문만 임베딩)
+  let embeddingStatus = 'ok'
+  try {
+    const embedding = await generateEmbedding(question.trim(), c.env)
+    await dbRun(c.env,
+      'UPDATE documents SET embedding = ?, updated_at = ? WHERE id = ? AND tenant_id = ?',
+      JSON.stringify(embedding), nowISO(), docId, tenantId
+    )
+  } catch (e) {
+    embeddingStatus = 'failed'
+    console.error('[documents] embedding error for doc:', docId, e)
+  }
 
   return c.json({
     success: true,
     data: {
       id: docId, question: question.trim(), answer: answer.trim(), category,
-      message: 'FAQ가 등록되었습니다. 임베딩이 백그라운드에서 처리됩니다.',
+      embedding_status: embeddingStatus,
+      message: embeddingStatus === 'ok'
+        ? 'FAQ가 등록되었습니다. 임베딩이 완료되었습니다.'
+        : 'FAQ가 등록되었습니다. 임베딩은 나중에 bulk-embed로 처리하세요.',
     },
   })
 })
@@ -219,9 +267,12 @@ documents.post('/embed', async (c) => {
   if (!question.trim() || !answer.trim())
     return c.json({ success: false, error: '질문과 답변을 입력하세요.' }, 400)
 
+  // 카테고리 검증
+  const catResult = await validateCategory(c.env, tenantId, body.category)
+
   let embedding: number[]
   try {
-    embedding = await generateEmbedding(`${question}\n${answer}`, c.env)
+    embedding = await generateEmbedding(question.trim(), c.env)
   } catch (e) {
     console.error('[documents] embed error:', e)
     return c.json({ success: false, error: '임베딩 생성에 실패했습니다.' }, 500)
@@ -241,7 +292,7 @@ documents.post('/embed', async (c) => {
     body.original_question || null, body.original_answer || null,
     body.refined_question  || null, body.refined_answer  || null,
     `${question}\n${answer}`,
-    body.category || '일반', body.language || 'ko',
+    catResult.name, body.language || 'ko',
     body.is_ai_refined ? 1 : 0,
     JSON.stringify(embedding), now, now
   )
@@ -266,7 +317,7 @@ documents.get('/', async (c) => {
   const conditions: string[] = ['tenant_id = ?', 'is_deleted = 0']
   const params: unknown[] = [tenantId]
 
-  if (category) { conditions.push('category = ?');           params.push(category) }
+  if (category) { conditions.push('category = ?'); params.push(category) }
   if (search)   { conditions.push('(question LIKE ? OR answer LIKE ?)'); params.push(`%${search}%`, `%${search}%`) }
 
   const where = `WHERE ${conditions.join(' AND ')}`
@@ -314,7 +365,6 @@ documents.put('/:id', async (c) => {
   try { body = await c.req.json() }
   catch { return c.json({ success: false, error: '잘못된 요청 형식입니다.' }, 400) }
 
-  // 소유권 확인
   const { data: existing } = await dbGet<{ id: string }>(c.env,
     'SELECT id FROM documents WHERE id = ? AND tenant_id = ? AND is_deleted = 0 LIMIT 1',
     docId, tenantId
@@ -333,8 +383,13 @@ documents.put('/:id', async (c) => {
     values.push(body.answer, body.answer)
   }
   if (body.category !== undefined) {
+    // 카테고리 검증 (categories 테이블 기반)
+    const putCatResult = await validateCategory(c.env, tenantId, body.category)
+    if (!putCatResult.valid && body.category.trim()) {
+      return c.json({ success: false, error: putCatResult.error }, 400)
+    }
     fields.push('category = ?')
-    values.push(body.category)
+    values.push(putCatResult.name)
   }
 
   if (!fields.length) return c.json({ success: true, message: '변경 없음' })
@@ -347,21 +402,22 @@ documents.put('/:id', async (c) => {
   )
   if (error) return c.json({ success: false, error }, 500)
 
-  // 질문/답변 변경 시 임베딩 재생성 (비동기)
+  // 질문/답변 변경 시 임베딩 재생성 (질문만 임베딩)
   if (body.question || body.answer) {
-    const q = body.question || ''
-    const a = body.answer   || ''
-    ;(async () => {
-      try {
-        const embedding = await generateEmbedding(`${q}\n${a}`, c.env)
-        await dbRun(c.env,
-          'UPDATE documents SET embedding = ?, updated_at = ? WHERE id = ? AND tenant_id = ?',
-          JSON.stringify(embedding), nowISO(), docId, tenantId
-        )
-      } catch (e) {
-        console.error('[documents] re-embed error:', docId, e)
-      }
-    })()
+    try {
+      const { data: updatedDoc } = await dbGet<{ question: string }>(c.env,
+        'SELECT question FROM documents WHERE id = ? AND tenant_id = ?',
+        docId, tenantId
+      )
+      const q = updatedDoc?.question || body.question || ''
+      const embedding = await generateEmbedding(q, c.env)
+      await dbRun(c.env,
+        'UPDATE documents SET embedding = ?, updated_at = ? WHERE id = ? AND tenant_id = ?',
+        JSON.stringify(embedding), nowISO(), docId, tenantId
+      )
+    } catch (e) {
+      console.error('[documents] re-embed error:', docId, e)
+    }
   }
 
   return c.json({ success: true, message: '수정되었습니다.' })

@@ -95,6 +95,15 @@ export const api = {
   uploadFaqExcel: (rows: { question: string; answer: string; category: string }[]) =>
     request<any>('POST', '/admin/faq/excel', { rows }),
 
+
+  // Categories
+  getCategories: () => request<any>('GET', '/categories'),
+  addCategory: (data: { name: string; sort_order?: number }) =>
+    request<any>('POST', '/categories', data),
+  updateCategory: (id: string, data: { name?: string; sort_order?: number }) =>
+    request<any>('PUT', `/categories/${id}`, data),
+  deleteCategory: (id: string) =>
+    request<any>('DELETE', `/categories/${id}`),
   // TOP10 분석 (NEW)
   getTop10: (period: string = 'month') =>
     request<any>('GET', `/admin/analytics/top10?period=${period}`),

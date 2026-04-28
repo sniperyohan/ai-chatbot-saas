@@ -131,3 +131,26 @@ if (fs.existsSync(distDir)) {
 } else {
   console.warn('⚠️  dist/ 디렉토리 없음 - 빌드 후 _routes.json이 자동 업데이트됩니다.');
 }
+
+// ──────────────────────────────────────────────────────────
+
+// dist/admin/index.html 동기화 (wrangler static asset용)
+function syncAdminHtml(htmlPath) {
+  if (!fs.existsSync(htmlPath)) return;
+  let html = fs.readFileSync(htmlPath, 'utf-8');
+  if (mainJs) html = html.replace(/index-[^"]+\.js/, mainJs.split('/').pop());
+  if (mainCss) html = html.replace(/index-[^"]+\.css/, mainCss.split('/').pop());
+  modulepreloads.forEach(href => {
+    const fileName = href.split('/').pop();
+    const prefix = fileName.split('-').slice(0, 2).join('-');
+    html = html.replace(new RegExp(prefix + '-[^"]+\.js'), fileName);
+  });
+  fs.writeFileSync(htmlPath, html, 'utf-8');
+  console.log('✅ ' + htmlPath + ' 동기화 완료');
+}
+
+const syncPaths = [
+  require('path').join(__dirname, '..', 'dist', 'admin', 'index.html'),
+  'C:/Users/homeyo/Downloads/dist/admin/index.html'
+];
+syncPaths.forEach(syncAdminHtml);

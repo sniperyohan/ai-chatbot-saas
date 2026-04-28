@@ -22,7 +22,15 @@ export default function ScenariosPage() {
   useEffect(() => {
     api.getScenarios().then(res => {
       const data: Record<string, any> = {}
-      for (const s of res.data?.items || []) data[s.scenario_type] = s
+      const items = res.data?.items || (Array.isArray(res.data) ? res.data : [])
+      for (const s of items) {
+        const key = s.scenario_type || s.type
+        if (key) {
+          let kws = s.trigger_keywords
+          if (typeof kws === 'string') { try { kws = JSON.parse(kws) } catch { kws = [] } }
+          data[key] = { ...s, scenario_type: key, trigger_keywords: kws || [] }
+        }
+      }
       // 없는 타입은 기본값으로 초기화
       for (const t of SCENARIO_TYPES) {
         if (!data[t.type]) {

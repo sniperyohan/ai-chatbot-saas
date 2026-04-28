@@ -52,8 +52,8 @@ auth.post('/super/login', async (c) => {
   // ── CASE A: D1 사용 ──────────────────────────────────
   if (isD1Configured(c.env)) {
     const { data: admin, error: dbErr } = await dbGet<{
-      id: string; email: string; password: string; is_active: number
-    }>(c.env, 'SELECT id, email, password, is_active FROM admins WHERE email = ? LIMIT 1', email)
+      id: string; email: string; password_hash: string; is_active: number
+    }>(c.env, 'SELECT id, email, password_hash, is_active FROM super_admins WHERE email = ? LIMIT 1', email)
 
     if (dbErr) {
       console.error('[super/login] D1 오류:', dbErr)
@@ -64,12 +64,12 @@ auth.post('/super/login', async (c) => {
     if (!admin.is_active)
       return c.json({ success: false, error: '비활성화된 계정입니다.' }, 403)
 
-    const isValid = await bcrypt.compare(password, admin.password)
+    const isValid = await bcrypt.compare(password, admin.password_hash)
     if (!isValid)
       return c.json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, 401)
 
     // 마지막 로그인 시간 업데이트
-    await dbRun(c.env, 'UPDATE admins SET last_login_at = ? WHERE id = ?', nowISO(), admin.id)
+    await dbRun(c.env, 'UPDATE super_admins SET last_login_at = ? WHERE id = ?', nowISO(), admin.id)
 
     const token = await signJwt({ sub: admin.id, email: admin.email, role: 'super_admin' }, effectiveSecret)
     return c.json({ success: true, data: { token, admin: { id: admin.id, email: admin.email } } })
@@ -128,7 +128,7 @@ auth.post('/admin/login', async (c) => {
     billing_day: number; subscribed_at: string | null
     faq_limit: number; chat_limit: number
   }>(c.env,
-    `SELECT id, email, password, company_name, plan, bot_name, widget_color,
+    `SELECT id, email, password_hash, company_name, plan, bot_name, widget_color,
             greeting_message, is_active, is_deleted, is_temp_password,
             login_fail_count, login_locked_until, billing_day, subscribed_at,
             faq_limit, chat_limit
@@ -155,7 +155,7 @@ auth.post('/admin/login', async (c) => {
   }
 
   // 비밀번호 검증
-  const isValid = await bcrypt.compare(password, tenant.password)
+  const isValid = await bcrypt.compare(password, tenant.password_hash)
 
   if (!isValid) {
     const newFailCount = (tenant.login_fail_count || 0) + 1
@@ -224,26 +224,26 @@ auth.put('/admin/password', adminAuthMiddleware, async (c) => {
 
   const tenantId = c.get('tenantId')!
 
-  const { data: tenant, error: dbErr } = await dbGet<{ id: string; password: string }>(
+  const { data: tenant, error: dbErr } = await dbGet<{ id: string; password_hash: string }>(
     c.env,
-    'SELECT id, password FROM tenants WHERE id = ? LIMIT 1',
+    'SELECT id, password_hash FROM tenants WHERE id = ? LIMIT 1',
     tenantId
   )
   if (dbErr || !tenant)
     return c.json({ success: false, error: '사용자를 찾을 수 없습니다.' }, 404)
 
-  const isCurrentValid = await bcrypt.compare(current_password, tenant.password)
+  const isCurrentValid = await bcrypt.compare(current_password, tenant.password_hash)
   if (!isCurrentValid)
     return c.json({ success: false, error: '현재 비밀번호가 올바르지 않습니다.' }, 400)
 
-  const isSame = await bcrypt.compare(new_password, tenant.password)
+  const isSame = await bcrypt.compare(new_password, tenant.password_hash)
   if (isSame)
     return c.json({ success: false, error: '새 비밀번호는 현재 비밀번호와 달라야 합니다.' }, 400)
 
   const hashed = await bcrypt.hash(new_password, SALT_ROUNDS)
   await dbRun(c.env,
-    'UPDATE tenants SET password = ?, is_temp_password = 0, password_changed_at = ?, updated_at = ? WHERE id = ?',
-    hashed, nowISO(), nowISO(), tenantId
+    'UPDATE tenants SET password_hash = ?, is_temp_password = 0, updated_at = ? WHERE id = ?',
+    hashed, nowISO(), tenantId
   )
 
   return c.json({ success: true, message: '비밀번호가 성공적으로 변경되었습니다.' })

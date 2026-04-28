@@ -187,8 +187,8 @@ function SubscriptionCard({ tenantPlan }: { tenantPlan: string }) {
   }
 
   const plan = sub?.plan || tenantPlan || 'basic'
-  const dday = sub?.days_until_billing
-  const nextBilling = sub?.next_billing_date
+  const dday = sub?.dday ?? sub?.days_until_billing
+  const nextBilling = sub?.subscription_end_date || sub?.expires_at
   const periodStart = sub?.current_period_start
   const periodEnd = sub?.current_period_end
   const billingDay = sub?.billing_day
@@ -202,9 +202,9 @@ function SubscriptionCard({ tenantPlan }: { tenantPlan: string }) {
     if (dday !== null && dday !== undefined && dday < 0) {
       banner = { bg: '#FEF2F2', color: '#991B1B', border: '#FECACA', text: '⛔ 구독이 만료되었습니다. 챗봇 서비스가 중단됩니다. 입금 후 입금했어요 버튼을 눌러주세요.' }
     } else if (dday === 0) {
-      banner = { bg: '#FFF7ED', color: '#9A3412', border: '#FED7AA', text: '⚠️ 오늘 결제일입니다!' }
+      banner = { bg: '#FFF7ED', color: '#9A3412', border: '#FED7AA', text: '⚠️ 오늘 서비스 만료일입니다!' }
     } else if (dday !== null && dday !== undefined && dday <= 7) {
-      banner = { bg: '#FEFCE8', color: '#854D0E', border: '#FEF08A', text: `⏰ 다음 결제일까지 D-${dday}입니다. 아래 계좌로 입금해 주세요.` }
+      banner = { bg: '#FEFCE8', color: '#854D0E', border: '#FEF08A', text: `⏰ 서비스 만료일까지 D-${dday}입니다. 미리 입금해 주세요.` }
     }
   }
 

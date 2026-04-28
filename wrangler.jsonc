@@ -9,22 +9,16 @@
   "assets": {
     "directory": "./dist/public",
     "binding": "ASSETS"
-  }
+  },
 
   // ─── Cloudflare D1 Database ───────────────────────────────
-  // D1 DB 생성 후 아래 주석을 해제하고 database_id를 교체:
-  // 1. Cloudflare Dashboard → Workers & Pages → D1 → Create database
-  //    database name: ai-chatbot-saas-db
-  // 2. 생성된 database_id를 복사하여 아래에 붙여넣기
-  // 3. 주석 해제 후 재배포: npx wrangler deploy
-  //
-  // "d1_databases": [
-  //   {
-  //     "binding": "DB",
-  //     "database_name": "ai-chatbot-saas-db",
-  //     "database_id": "여기에_DATABASE_ID_입력"
-  //   }
-  // ]
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ai-chatbot-saas-db",
+      "database_id": "cf3f5086-ff3b-4fcc-a573-6aa6bfdaca79"
+    }
+  ]
 
   // ─── 환경변수 (Cloudflare Dashboard → Workers → Settings) ──
   // npx wrangler secret put SUPER_JWT_SECRET

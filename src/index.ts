@@ -18,6 +18,8 @@ import statsRouter from './routes/stats'
 import superRouter from './routes/super'
 import integrationRouter from './routes/integration'
 import tenantRouter from './routes/tenant'
+import categoriesRouter from './routes/categories'
+import scenariosRouter from './routes/scenarios'
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
@@ -86,6 +88,11 @@ app.route('/api', integrationRouter)
 // 테넌트 자체 정보 + 시나리오 (JWT 필요)
 app.route('/api/admin', tenantRouter)
 
+// 카테고리 관리 (JWT 필요)
+app.route('/api/categories', categoriesRouter)
+app.route('/api/admin/categories', categoriesRouter)
+app.route('/api/admin/scenarios', scenariosRouter)
+
 // Admin SPA - index.html을 직접 반환 (SPA routing 지원)
 const ADMIN_HTML = `<!DOCTYPE html>
 <html lang="ko">
@@ -97,9 +104,9 @@ const ADMIN_HTML = `<!DOCTYPE html>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <script type="module" crossorigin src="/admin/assets/index-CGFUFgJ--v2.js"></script>
+  <script type="module" crossorigin src="/admin/assets/index-CEJp9fH4-v2.js"></script>
   <link rel="modulepreload" crossorigin href="/admin/assets/react-vendor-B7hvkJMs-v2.js">
-  <link rel="modulepreload" crossorigin href="/admin/assets/lucide-vendor-5B2l2DRB-v2.js">
+  <link rel="modulepreload" crossorigin href="/admin/assets/lucide-vendor-DS2tMtmm-v2.js">
   <link rel="modulepreload" crossorigin href="/admin/assets/recharts-vendor-C7OM07X2-v2.js">
   <link rel="stylesheet" crossorigin href="/admin/assets/index-MX6WQWWt.css">
 </head>
@@ -173,5 +180,6 @@ app.onError((err, c) => {
     500
   )
 })
+
 
 export default app

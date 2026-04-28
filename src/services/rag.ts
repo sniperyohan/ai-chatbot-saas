@@ -8,7 +8,7 @@ import { generateQueryEmbedding, generateAnswer } from './gemini'
 import { dbGet, dbAll, dbRun, generateId } from '../lib/db'
 import { Bindings } from '../types'
 
-const MATCH_THRESHOLD = 0.7
+const MATCH_THRESHOLD = 0.3
 const MATCH_COUNT     = 3
 
 // ─────────────────────────────────────────
@@ -75,7 +75,10 @@ export async function searchSimilarDocuments(
         const similarity = cosineSimilarity(queryEmbedding, docEmbedding)
         return { ...doc, similarity }
       })
-      .filter(doc => doc.similarity >= MATCH_THRESHOLD)
+      .filter(doc => {
+        console.log('[RAG DEBUG] question:', doc.question, '| similarity:', doc.similarity)
+        return doc.similarity >= MATCH_THRESHOLD
+      })
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit)
 
@@ -223,6 +226,36 @@ export async function processMessage(
 
   const fallbackMsg = tenant.fallback_message || '죄송합니다. 잘 이해하지 못했습니다. 담당자에게 문의해주세요.'
 
+
+  // ── Step 1-1: 시나리오 매칭 (키워드 일치시 즉시 반환 - Gemini API 호출 없음) ──
+  try {
+    const { data: scenarioRows } = await dbAll<{
+      id: string; trigger_keywords: string; response_template: string; type: string
+    }>(env,
+      `SELECT id, trigger_keywords, response_template, type FROM scenarios WHERE tenant_id = ? AND is_active = 1 AND response_template != ''`,
+      tenantId
+    )
+    if (scenarioRows && scenarioRows.length > 0) {
+      const msgLower = userMessage.toLowerCase()
+      for (const sc of scenarioRows) {
+        let keywords: string[] = []
+        try { keywords = JSON.parse(sc.trigger_keywords) } catch {}
+        const matched = keywords.some(kw => kw && msgLower.includes(kw.toLowerCase()))
+        if (matched) {
+          await saveChatLog(env, {
+            tenantId, sessionId, userMessage,
+            botResponse: sc.response_template,
+            intent: sc.type || 'SCENARIO',
+            channel, isAnswered: true, responseTime: 0
+          })
+          return { answer: sc.response_template, intent: sc.type || 'SCENARIO', isAnswered: true, responseTime: 0 }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[rag] scenario match error:', e)
+  }
+
   // ── Step 2: 운영시간 체크 ─────────────────────────
   if (tenant.business_hours_enabled) {
     const isOpen = isWithinBusinessHours(tenant.business_hours)
@@ -249,7 +282,7 @@ export async function processMessage(
 
     // ── Step 4: 유사 FAQ 검색 ─────────────────────────
     let matchedDocs: MatchedDocument[] = []
-    if (queryEmbedding.length > 0) {
+    if (queryEmbedding.length > 0) { /* debug: threshold disabled */
       try {
         matchedDocs = await searchSimilarDocuments(tenantId, queryEmbedding, env, MATCH_COUNT)
       } catch (e) {
@@ -257,9 +290,38 @@ export async function processMessage(
       }
     }
 
+    // ── Step 4.5: 매칭 실패 시 상위 FAQ fallback ──────
+    let finalDocs = matchedDocs
+    if (matchedDocs.length === 0 && queryEmbedding.length > 0) {
+      try {
+        // 임계값 없이 유사도 상위 3개 가져오기
+        const { data: allDocs } = await dbAll<{
+          id: string; question: string; answer: string; category: string; embedding: string
+        }>(env,
+          `SELECT id, question, answer, category, embedding
+           FROM documents
+           WHERE tenant_id = ? AND is_active = 1 AND is_deleted = 0 AND embedding IS NOT NULL
+           LIMIT 500`,
+          tenantId
+        )
+        if (allDocs && allDocs.length > 0) {
+          finalDocs = allDocs
+            .map(doc => {
+              let emb: number[] = []
+              try { emb = JSON.parse(doc.embedding) } catch {}
+              return { ...doc, similarity: cosineSimilarity(queryEmbedding, emb) }
+            })
+            .sort((a, b) => b.similarity - a.similarity)
+            .slice(0, 3)
+        }
+      } catch (e) {
+        console.error('[rag] fallback context error:', e)
+      }
+    }
+
     // ── Step 5: 컨텍스트 구성 ─────────────────────────
-    const context = matchedDocs.length > 0
-      ? matchedDocs
+    const context = finalDocs.length > 0
+      ? finalDocs
           .slice(0, 3)
           .map((doc, i) => `[FAQ ${i + 1}]\n질문: ${doc.question}\n답변: ${doc.answer}`)
           .join('\n\n')

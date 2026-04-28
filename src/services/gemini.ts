@@ -5,9 +5,9 @@
 // - Cloudflare Workers fetch API 전용 (node-fetch 금지)
 // =====================================================
 
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
+const GEMINI_API_BASE = 'https://gateway.ai.cloudflare.com/v1/4d630c2b8828c3d9c6d9d69a33e66b33/gemini-open/google-ai-studio/v1beta'
 const EMBED_MODEL     = 'models/gemini-embedding-001'   // ⚠️ text-embedding-004 폐기됨
-const CHAT_MODEL      = 'models/gemini-1.5-flash'
+const CHAT_MODEL = 'models/gemini-2.5-flash'
 const EMBED_DIM       = 768
 
 // ─────────────────────────────────────────
@@ -50,7 +50,6 @@ export async function generateEmbedding(
         model: EMBED_MODEL,
         content: { parts: [{ text }] },
         taskType: 'RETRIEVAL_DOCUMENT',
-        output_dimensionality: EMBED_DIM,
       }),
     },
     20000
@@ -59,7 +58,7 @@ export async function generateEmbedding(
   if (!res.ok) {
     const errBody = await res.text()
     console.error('[gemini] generateEmbedding error:', res.status, errBody)
-    throw new Error(`Gemini Embedding API error: ${res.status}`)
+    throw new Error(`Gemini Embedding API error: ${res.status} - ${errBody}`)
   }
 
   const json = (await res.json()) as { embedding?: { values?: number[] } }
@@ -93,7 +92,6 @@ export async function generateQueryEmbedding(
         model: EMBED_MODEL,
         content: { parts: [{ text }] },
         taskType: 'RETRIEVAL_QUERY',
-        output_dimensionality: EMBED_DIM,
       }),
     },
     15000
@@ -135,7 +133,7 @@ export async function generateAnswer(
 
   const botName      = botSettings?.bot_name || 'AI 상담봇'
   const tone         = botSettings?.response_tone || 'friendly'
-  const maxLen       = botSettings?.max_response_length || 500
+  const maxLen       = botSettings?.max_response_length || 800
   const fallbackMsg  = botSettings?.fallback_message || '죄송합니다. 잘 이해하지 못했습니다. 담당자에게 문의해주세요.'
   const systemPrompt = botSettings?.system_prompt || ''
 
@@ -188,7 +186,7 @@ ${question}
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.3,
-          maxOutputTokens: Math.min(maxLen * 3, 2048),
+          maxOutputTokens: Math.min(maxLen * 5, 4096),
           topP: 0.8,
           topK: 40,
         },
@@ -211,6 +209,51 @@ ${question}
 }
 
 // ─────────────────────────────────────────
+// ─────────────────────────────────────────
+// 5. 유사 질문 생성 (임베딩 품질 향상)
+// ─────────────────────────────────────────
+export async function generateSimilarQuestions(
+  question: string,
+  answer: string,
+  env: { GEMINI_API_KEY: string }
+): Promise<string[]> {
+  const apiKey = env.GEMINI_API_KEY
+  if (!apiKey) return []
+
+  try {
+    const res = await fetchWithTimeout(
+      `${GEMINI_API_BASE}/${CHAT_MODEL}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: `다음 FAQ 질문과 동일한 의미의 짧은 한국어 질문 5개를 JSON 문자열 배열로만 출력하세요.
+FAQ 질문: ${question}
+
+출력 형식 예시(이 형식만 허용):
+["질문1", "질문2", "질문3", "질문4", "질문5"]
+
+주의: 객체({})가 아닌 문자열 배열만 출력, 마크다운 없이 JSON만 출력` }]
+          }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 500 },
+        }),
+      },
+      10000
+    )
+    if (!res.ok) return []
+    const json = await res.json() as any
+    const text = json.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    // 마크다운 코드블록 제거 후 JSON 파싱
+    const clean = text.replace(/```json/g, '').replace(/```/g, '').trim()
+    const match = clean.match(/\[.*\]/s)
+    if (!match) return []
+    try { return JSON.parse(match[0]) as string[] } catch { return [] }
+  } catch {
+    return []
+  }
+}
+
 // 4. FAQ 자동 개선 (refine)
 //    한국어로 자연스럽게 다듬기
 // ─────────────────────────────────────────

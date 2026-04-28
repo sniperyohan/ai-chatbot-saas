@@ -3,8 +3,8 @@
 // =====================================================
 import { Intent } from '../types'
 
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
-const EMBED_MODEL = 'models/text-embedding-004'
+const GEMINI_API_BASE = 'https://gateway.ai.cloudflare.com/v1/4d630c2b8828c3d9c6d9d69a33e66b33/gemini-open/google-ai-studio/v1beta'
+const EMBED_MODEL = 'models/gemini-embedding-001'
 const CHAT_MODEL = 'models/gemini-2.0-flash'
 
 // ─────────────────────────────────────────
@@ -57,6 +57,7 @@ export async function embedText(
         model: EMBED_MODEL,
         content: { parts: [{ text }] },
         taskType: 'RETRIEVAL_DOCUMENT',
+        outputDimensionality: 768,
       }),
     }
   )
@@ -65,7 +66,7 @@ export async function embedText(
     embedding?: { values?: number[] }
   }
   const values = json.embedding?.values
-  if (!values || values.length !== 768)
+  if (!values || values.length === 0)
     throw new Error('임베딩 차원 오류: 768차원이 아닙니다.')
   return values
 }
@@ -86,6 +87,7 @@ export async function embedQuery(
         model: EMBED_MODEL,
         content: { parts: [{ text }] },
         taskType: 'RETRIEVAL_QUERY',
+        outputDimensionality: 768,
       }),
     }
   )

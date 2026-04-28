@@ -471,10 +471,10 @@ export default function InstallPage() {
 
       {/* ── 문의 ── */}
       <div style={{ ...S.card, textAlign: 'center', padding: '24px' }}>
-        <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>설치가 어려우신가요?</p>
+        <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>설치가 어려우시면 연락주세요</p>
         <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-          대시보드의 입금했어요 버튼을 통해 설치 지원을 요청하시거나,<br/>
-          담당자에게 직접 문의해 주시면 도움을 드리겠습니다.
+          
+          📞 010-2974-0933
         </p>
       </div>
     </div>

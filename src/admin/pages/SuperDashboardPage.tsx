@@ -340,7 +340,7 @@ function ResetPasswordModal({ tenant, onClose, onSuccess }: {
     setLoading(true); setErr('')
     try {
       const res = await superApi.resetTenantPassword(tenant.id)
-      setTempPw(res.data?.temp_password || 'Test1234!')
+      setTempPw((res as any)?.data?.temp_password || (res as any)?.temp_password || '')
       setEmailSent(res.data?.email_sent || false)
       setPhase('done')
       onSuccess(`${tenant.company_name}의 비밀번호가 초기화되었습니다.`)
@@ -396,10 +396,8 @@ function ResetPasswordModal({ tenant, onClose, onSuccess }: {
             padding: '10px 12px', background: 'var(--bg-primary)', borderRadius: '8px',
             lineHeight: 1.6,
           }}>
-            {emailSent
-              ? `📧 ${tenant.email}으로 임시 비밀번호가 발송되었습니다.`
-              : `⚠️ 이메일 발송에 실패했습니다. 위 임시 비밀번호를 ${tenant.email}에 직접 전달해 주세요.`
-            }
+        🔑 위 임시 비밀번호를 고객사에 직접 전달해 주세요.
+
           </p>
           <button onClick={onClose} style={{ ...S.btnPrimary, width: '100%' }}>확인</button>
         </div>
@@ -425,7 +423,7 @@ function ResetPasswordModal({ tenant, onClose, onSuccess }: {
           <p style={{ fontSize: '14px', color: 'var(--text-primary)', margin: 0, lineHeight: 1.6 }}>
             <strong>{tenant.company_name}</strong>의 비밀번호를 초기화하시겠습니까?<br />
             <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              새 임시 비밀번호가 생성되며 이메일로 발송됩니다.
+              새 임시 비밀번호가 생성됩니다. 고객사에 직접 전달해 주세요.
             </span>
           </p>
         </div>
@@ -1526,7 +1524,7 @@ function TenantsTab({ onShowToast }: { onShowToast: (msg: string, type: 'success
         <ResetPasswordModal
           tenant={resetPwModal}
           onClose={() => setResetPwModal(null)}
-          onSuccess={msg => { onShowToast(msg); setResetPwModal(null) }}
+          onSuccess={msg => { onShowToast(msg) }}
         />
       )}
       {deleteModal && (
@@ -1971,7 +1969,7 @@ function PlatformsTab({ onShowToast }: { onShowToast: (msg: string, type: 'succe
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-            API 플랫폼 목록
+            API 플랫폼 목록 (샘플)
           </h2>
           <button
             onClick={() => setAddModal(true)}
@@ -2154,7 +2152,7 @@ export default function SuperDashboardPage() {
     setLoadingStats(true)
     try {
       const res = await superApi.getDashboard()
-      setStats(res.data)
+      setStats(res.data?.stats || res.data)
     } catch {
       // 통계 실패 무시
     } finally {

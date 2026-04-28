@@ -166,7 +166,7 @@ chat.post('/kakao/chat', async (c) => {
   }
 
   const userMessage = body.userRequest?.utterance?.trim() || ''
-  const tenantId    = body.tenant_id || ''
+  const tenantId    = c.req.query('tenant_id') || body.tenant_id || ''
   const sessionId   = `kakao_${body.userRequest?.user?.id || 'anon'}_${Date.now()}`
 
   if (!userMessage || !tenantId) {
@@ -207,7 +207,7 @@ chat.post('/naver/chat', async (c) => {
 
   const userMessage = body.textContent?.text?.trim() || ''
   const userId      = body.user || ''
-  const tenantId    = body.tenant_id || ''
+  const tenantId    = c.req.query('tenant_id') || body.tenant_id || ''
   const sessionId   = `naver_${userId}_${Date.now()}`
 
   if (!userMessage || !tenantId) {

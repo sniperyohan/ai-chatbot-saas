@@ -13,6 +13,7 @@ import ScenariosPage from './pages/ScenariosPage'
 import SettingsPage from './pages/SettingsPage'
 import InstallPage from './pages/InstallPage'
 import AnalyticsPage from './pages/AnalyticsPage'
+
 import SuperLoginPage from './pages/SuperLoginPage'
 import SuperDashboardPage from './pages/SuperDashboardPage'
 
@@ -52,6 +53,8 @@ function AdminApp() {
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="install" element={<InstallPage />} />
                 <Route path="analytics" element={<AnalyticsPage />} />
+                <Route path="categories" element={<Navigate to="/admin/faq" replace />} />
+
                 <Route path="*" element={<Navigate to="dashboard" replace />} />
               </Routes>
             </Layout>

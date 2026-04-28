@@ -4,6 +4,7 @@ import {
   LayoutDashboard, BookOpen, MessageSquare, GitBranch,
   Settings, Code2, Bot, Sun, Moon, ChevronDown, LogOut, KeyRound, User, AlertTriangle, BarChart2
 } from 'lucide-react'
+
 import { useAuth } from '../context/AuthContext'
 import { useDarkMode } from '../hooks/useDarkMode'
 import { useToast } from '../hooks/useToast'
@@ -70,7 +71,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const showWarning100 = !isMaster && faqPct >= 100
 
   // 결제일 임박 경고 (D-7 이내)
-  const daysUntil = tenant?.days_until_billing
+  const daysUntil = tenant?.dday ?? tenant?.days_until_billing
   const showBillingWarning = !isMaster && daysUntil !== undefined && daysUntil <= 7
 
   const planLabel: Record<string, string> = { basic: 'Basic', pro: 'Pro', master: 'Master' }
@@ -270,7 +271,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div style={{ maxWidth: '1280px', margin: '0 auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <AlertTriangle size={16} color="#D97706"/>
             <span style={{ fontSize: '13px', color: '#9A3412', fontWeight: 600 }}>
-              💳 다음 결제일({tenant?.next_billing_date})까지 D-{daysUntil}일 남았습니다. 미리 입금해 주세요.
+              💳 서비스 만료일({tenant?.subscription_end_date})까지 D-{daysUntil}일 남았습니다. 미리 입금해 주세요.
             </span>
           </div>
         </div>

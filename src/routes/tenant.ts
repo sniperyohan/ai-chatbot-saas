@@ -231,7 +231,8 @@ tenant.put('/settings', async (c) => {
     'business_hours_enabled', 'business_hours', 'off_hours_message', 'lunch_break',
   ]
   const jsonFields = new Set(['supported_languages', 'business_hours', 'lunch_break'])
-  const intFields  = new Set(['max_response_length', 'show_sources', 'auto_escalate', 'business_hours_enabled'])
+  const intFields  = new Set(['show_sources', 'auto_escalate', 'business_hours_enabled'])
+  const numFields  = new Set(['max_response_length'])
 
   const fields: string[] = []
   const values: unknown[] = []
@@ -243,6 +244,8 @@ tenant.put('/settings', async (c) => {
       values.push(JSON.stringify(body[k]))
     } else if (intFields.has(k)) {
       values.push(body[k] ? 1 : 0)
+    } else if (numFields.has(k)) {
+      values.push(Number(body[k]) || 500)
     } else {
       values.push(body[k])
     }
@@ -341,8 +344,13 @@ tenant.get('/stats', async (c) => {
 // GET /api/admin/scenarios
 // ─────────────────────────────────────────
 tenant.get('/scenarios', async (c) => {
-  // D1에는 scenarios 테이블 없음 → 빈 배열 반환
-  return c.json({ success: true, data: [] })
+  const tenantId = c.get('tenantId')!
+  const { data, error } = await dbAll<any>(c.env,
+    'SELECT * FROM scenarios WHERE tenant_id = ? ORDER BY created_at ASC',
+    tenantId
+  )
+  if (error) return c.json({ success: false, error: String(error) }, 500)
+  return c.json({ success: true, data: data || [] })
 })
 
 // POST /api/admin/scenarios
@@ -350,12 +358,41 @@ tenant.post('/scenarios', async (c) => {
   let body: Record<string, unknown>
   try { body = await c.req.json() } catch { return c.json({ success: false, error: '잘못된 요청' }, 400) }
   const tenantId = c.get('tenantId')!
-  return c.json({ success: true, data: { id: generateId(), ...body, tenant_id: tenantId } }, 201)
+  const id = generateId()
+  const now = new Date().toISOString()
+  const { error } = await dbRun(c.env,
+    `INSERT INTO scenarios (id, tenant_id, name, type, is_active, trigger_keywords, response_template, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    id, tenantId, String(body.name || ''), String(body.type || 'custom'), body.is_active !== false ? 1 : 0, JSON.stringify(body.trigger_keywords || []), String(body.response_template || ''), now, now
+  )
+  if (error) return c.json({ success: false, error: String(error) }, 500)
+  return c.json({ success: true, data: { id, ...body, tenant_id: tenantId, created_at: now, updated_at: now } }, 201)
 })
 
 // PUT /api/admin/scenarios/:id
 tenant.put('/scenarios/:id', async (c) => {
-  return c.json({ success: true, message: '업데이트 완료' })
+  const id = c.req.param('id')
+  const tenantId = c.get('tenantId')!
+  let body: Record<string, unknown>
+  try { body = await c.req.json() } catch { return c.json({ success: false, error: '잘못된 요청' }, 400) }
+  const now = new Date().toISOString()
+  const { error } = await dbRun(c.env,
+    `UPDATE scenarios SET name = ?, type = ?, is_active = ?, trigger_keywords = ?, response_template = ?, updated_at = ? WHERE id = ? AND tenant_id = ?`,
+    String(body.name || ''), String(body.type || 'custom'), body.is_active !== false ? 1 : 0, JSON.stringify(body.trigger_keywords || []), String(body.response_template || ''), now, id, tenantId
+  )
+  if (error) return c.json({ success: false, error: String(error) }, 500)
+  return c.json({ success: true })
+})
+
+// DELETE /api/admin/scenarios/:id
+tenant.delete('/scenarios/:id', async (c) => {
+  const id = c.req.param('id')
+  const tenantId = c.get('tenantId')!
+  const { error } = await dbRun(c.env,
+    'DELETE FROM scenarios WHERE id = ? AND tenant_id = ?',
+    id, tenantId
+  )
+  if (error) return c.json({ success: false, error: String(error) }, 500)
+  return c.json({ success: true })
 })
 
 // ─────────────────────────────────────────
@@ -393,7 +430,13 @@ tenant.get('/subscription', async (c) => {
       subscription_end_date:   t.subscription_end_date   || billingInfo.current_period_end,
       subscription_status:     t.subscription_status     || 'active',
       payment_requested_at:    t.payment_requested_at,
-      dday:          billingInfo.days_until_billing,
+      dday: (() => {
+        const expStr = t.subscription_end_date || t.expires_at;
+        if (expStr == null) return billingInfo.days_until_billing;
+        const today = new Date(); today.setHours(0,0,0,0);
+        const exp = new Date(expStr); exp.setHours(0,0,0,0);
+        return Math.floor((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      })(),
       monthly_price: PLAN_PRICE[t.plan] || 99000,
       ...billingInfo,
       payment_settings: paySettings || {
