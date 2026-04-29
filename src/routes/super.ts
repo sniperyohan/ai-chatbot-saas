@@ -84,10 +84,11 @@ superRouter.use('/*', superAuthMiddleware)
 superRouter.get('/dashboard', async (c) => {
   try {
     const [tenantCount, activeCount, chatCount, docCount] = await Promise.all([
-      dbGet(c.env, 'SELECT COUNT(*) as total FROM tenants'),
+            dbGet(c.env, 'SELECT COUNT(*) as total FROM tenants'),
       dbGet(c.env, 'SELECT COUNT(*) as total FROM tenants WHERE is_active=1'),
-      dbGet(c.env, 'SELECT COUNT(*) as total FROM chat_sessions'),
+      dbGet(c.env, 'SELECT COUNT(DISTINCT session_id) as total FROM chat_logs'),
       dbGet(c.env, 'SELECT COUNT(*) as total FROM documents'),
+
     ])
 
     const tenantsForRevenue = await dbAll(c.env, 'SELECT plan FROM tenants WHERE is_active=1')
