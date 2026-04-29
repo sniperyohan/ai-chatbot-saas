@@ -333,8 +333,14 @@ function SubscriptionCard({ tenantPlan }: { tenantPlan: string }) {
         {copied ? <><Check size={12}/>복사됨</> : <><Copy size={12}/>복사</>}
       </button>
     </div>
+    {sub.payment_settings.account_holder && (
+      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '6px' }}>
+        예금주: <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{sub.payment_settings.account_holder}</span>
+      </div>
+    )}
   </div>
 )}
+
             {sub.payment_settings.payment_guide && (
               <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 10px', lineHeight: 1.5 }}>{sub.payment_settings.payment_guide}</p>
             )}
