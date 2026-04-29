@@ -416,7 +416,7 @@ tenant.get('/subscription', async (c) => {
 
   const { data: paySettings } = await dbGet<{
     bank_name: string; account_number: string; account_holder: string; payment_guide: string
-  }>(c.env, 'SELECT bank_name, account_number, account_holder, payment_guide FROM payment_settings LIMIT 1')
+   }>(c.env, 'SELECT bank_name, account_number, account_holder, payment_guide FROM super_payment_settings ORDER BY updated_at DESC LIMIT 1')
 
   const billingDay    = t.billing_day || 1
   const subscribedAt  = t.subscribed_at || t.subscription_start_date || null
