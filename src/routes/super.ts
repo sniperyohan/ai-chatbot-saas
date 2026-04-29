@@ -397,8 +397,8 @@ superRouter.get('/payment-settings', async (c) => {
   }
 })
 
-// POST /api/super/payment-settings
-superRouter.post('/payment-settings', async (c) => {
+// PUT /api/super/payment-settings
+superRouter.put('/payment-settings', async (c) => {
   try {
     const { bank_name, account_number, account_holder, payment_guide } = await c.req.json() as any
     const { data: existing } = await dbGet(c.env, 'SELECT id FROM super_payment_settings LIMIT 1')
