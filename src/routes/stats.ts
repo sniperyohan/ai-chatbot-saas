@@ -138,16 +138,16 @@ stats.get('/logs', async (c) => {
 
   const where = `WHERE ${conditions.join(' AND ')}`
 
-  const [rowsRes, countRes] = await Promise.all([
+    const [rowsRes, countRes] = await Promise.all([
     dbAll<{
-              id: string; channel: string
-
+      id: string; message_id: string; channel: string
       user_message: string; bot_answer: string
       detected_language: string; intent: string; created_at: string
     }>(c.env,
-      `SELECT id, , channel, user_message, bot_answer, detected_language, intent, created_at
+      `SELECT id, message_id, channel, user_message, bot_answer, detected_language, intent, created_at
        FROM chat_logs ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       ...params, limit, offset
+
     ),
     dbGet<{ total: number }>(c.env,
       `SELECT COUNT(*) as total FROM chat_logs ${where}`, ...params
