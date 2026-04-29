@@ -134,7 +134,8 @@ superRouter.get('/tenants', async (c) => {
     const search = c.req.query('search') || ''
     const offset = (page - 1) * limit
 
-    let query  = 'SELECT id,company_name,email,phone,plan,is_active,subscription_end_date,memo,created_at FROM tenants'
+    let query  = 'SELECT id,company_name,email,phone,plan,is_active,subscription_end_date,subscription_status,payment_requested_at,payment_memo,memo,created_at FROM tenants'
+
     let cntQ   = 'SELECT COUNT(*) as total FROM tenants'
     const args: unknown[] = []
 
@@ -212,7 +213,8 @@ superRouter.post('/tenants', async (c) => {
 superRouter.get('/tenants/:id', async (c) => {
   try {
     const { data: tenant } = await dbGet(c.env,
-      'SELECT id,company_name,email,phone,plan,is_active,subscription_end_date,memo,created_at FROM tenants WHERE id=?',
+            'SELECT id,company_name,email,phone,plan,is_active,subscription_end_date,subscription_status,payment_requested_at,payment_memo,memo,created_at FROM tenants WHERE id=?',
+
       c.req.param('id'))
     if (!tenant) return c.json({ success: false, error: '고객사를 찾을 수 없습니다.' }, 404)
     return c.json({ success: true, data: tenant })
