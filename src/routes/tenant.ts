@@ -591,11 +591,11 @@ tenant.get('/analytics/top10', async (c) => {
   }
 
   const sql    = startISO
-    ? 'SELECT user_message, intent, bot_response FROM chat_logs WHERE tenant_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 1000'
-    : 'SELECT user_message, intent, bot_response FROM chat_logs WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1000'
+    ? 'SELECT user_message, intent, bot_answer FROM chat_logs WHERE tenant_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 1000'
+    : 'SELECT user_message, intent, bot_answer FROM chat_logs WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1000'
   const params = startISO ? [tenantId, startISO] : [tenantId]
 
-  const { data: logs } = await dbAll<{ user_message: string; intent: string; bot_response: string }>(c.env, sql, ...params)
+  const { data: logs } = await dbAll<{ user_message: string; intent: string; bot_answer: string }>(c.env, sql, ...params)
 
   if (!logs || logs.length === 0) {
     return c.json({
@@ -608,7 +608,7 @@ tenant.get('/analytics/top10', async (c) => {
   for (const log of logs) {
     const msg = (log.user_message || '').trim().slice(0, 100)
     if (!msg || msg.length < 2) continue
-    const answered = !!(log.bot_response && log.bot_response.length > 10)
+    const answered = !!(log.bot_answer && log.bot_answer.length > 10)
     const existing = freqMap.get(msg)
     if (existing) {
       existing.count++

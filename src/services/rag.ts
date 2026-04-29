@@ -149,16 +149,17 @@ async function saveChatLog(
   }
 ): Promise<void> {
   try {
-    await dbRun(env,
+        await dbRun(env,
       `INSERT INTO chat_logs
-        (id, tenant_id, session_id, user_message, bot_response, bot_answer,
+        (id, tenant_id, session_id, user_message, bot_answer,
          channel, intent, detected_language, response_time_ms, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
       generateId(), log.tenant_id, log.session_id,
-      log.user_message, log.bot_response, log.bot_response,
+      log.user_message, log.bot_response,
       log.channel, log.intent, 'ko',
       log.response_time, new Date().toISOString()
     )
+
   } catch (e) {
     console.error('[rag] saveChatLog D1 error:', e)
   }

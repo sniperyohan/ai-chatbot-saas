@@ -140,11 +140,12 @@ stats.get('/logs', async (c) => {
 
   const [rowsRes, countRes] = await Promise.all([
     dbAll<{
-      id: string; message_id: string; channel: string
+              id: string; channel: string
+
       user_message: string; bot_answer: string
       detected_language: string; intent: string; created_at: string
     }>(c.env,
-      `SELECT id, message_id, channel, user_message, bot_answer, detected_language, intent, created_at
+      `SELECT id, , channel, user_message, bot_answer, detected_language, intent, created_at
        FROM chat_logs ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       ...params, limit, offset
     ),
