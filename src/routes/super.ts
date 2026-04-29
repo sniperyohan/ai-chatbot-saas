@@ -331,8 +331,9 @@ superRouter.post('/tenants/:id/confirm-payment', async (c) => {
     const newDate = base.toISOString().slice(0, 10)
 
     await dbRun(c.env,
-      'UPDATE tenants SET is_active=1,subscription_end_date=?,updated_at=? WHERE id=?',
-      newDate, nowISO(), id)
+      'UPDATE tenants SET is_active=1,subscription_end_date=?,subscription_status=?,payment_requested_at=NULL,payment_memo=NULL,updated_at=? WHERE id=?',
+      newDate, 'active', nowISO(), id)
+
 
     return c.json({ success: true, message: `입금 확인 완료. 구독이 ${newDate}까지 연장되었습니다.` })
   } catch (e: any) {
