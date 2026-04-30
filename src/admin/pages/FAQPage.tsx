@@ -809,6 +809,23 @@ export default function FAQPage() {
           <div style={S.card}>
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
               <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>FAQ 목록</h3>
+                            <button
+                onClick={handleDownloadExcel}
+                disabled={total === 0}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '8px 14px', borderRadius: '8px',
+                  background: total === 0 ? '#E5E7EB' : '#10B981',
+                  color: total === 0 ? '#9CA3AF' : '#fff',
+                  border: 'none', fontSize: '13px', fontWeight: 600,
+                  cursor: total === 0 ? 'not-allowed' : 'pointer',
+                }}
+                title="검색/필터링된 FAQ를 엑셀로 다운로드합니다"
+              >
+                <Download size={14} />
+                엑셀 다운로드
+              </button>
+
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '200px', position: 'relative' }}>
                 <Search size={15} color="var(--text-secondary)" style={{ position: 'absolute', left: '12px', pointerEvents: 'none' }} />
                 <input type="text" value={searchQuery} onChange={e => handleSearch(e.target.value)}
