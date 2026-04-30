@@ -302,7 +302,7 @@ export default function FAQPage() {
   const pct = limit === -1 ? 0 : Math.round((total / limit) * 100)
   const barColor = pct >= 100 ? '#EF4444' : pct >= 80 ? '#F59E0B' : '#4F46E5'
 
-    // ── 엑셀 다운로드 ──
+    // ── FAQ 내보내기 ──
   const handleDownloadExcel = async () => {
     try {
       toast.info('엑셀 파일 생성 중...')
@@ -342,7 +342,7 @@ export default function FAQPage() {
       toast.success(`${allDocs.length}개의 FAQ를 다운로드했습니다`)
     } catch (e) {
       console.error('Excel download error:', e)
-      toast.error('엑셀 다운로드에 실패했습니다')
+      toast.error('FAQ 내보내기에 실패했습니다')
     }
   }
 
@@ -418,7 +418,7 @@ export default function FAQPage() {
     finally { setSaving(false) }
   }
 
-  // ── 엑셀 템플릿 다운로드 ──
+  // ── 엑셀 샘플 양식 받기 ──
   const handleDownloadTemplate = () => {
     const wb = XLSX.utils.book_new()
     const headerRow = ['질문', '답변', '카테고리']
@@ -686,7 +686,7 @@ export default function FAQPage() {
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', background: '#059669', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', minHeight: '38px' }}
               >
                 <Download size={14} />
-                템플릿 다운로드
+                샘플 양식 받기
               </button>
             </div>
 
@@ -868,7 +868,7 @@ export default function FAQPage() {
                 title="검색/필터링된 FAQ를 엑셀로 다운로드합니다"
               >
                 <Download size={14} />
-                엑셀 다운로드
+                FAQ 내보내기
               </button>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '200px', position: 'relative' }}>
