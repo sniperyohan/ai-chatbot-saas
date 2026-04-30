@@ -174,30 +174,47 @@ ${question}
 [답변]`
   }
 
-  const res = await fetchWithTimeout(
-    `${GEMINI_API_BASE}/${CHAT_MODEL}:generateContent`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: Math.min(maxLen * 5, 4096),
-          topP: 0.8,
-          topK: 40,
-        },
-      }),
+   // 503/429/500/502 에러 시 자동 재시도 (카카오 5초 타임아웃 고려: 최대 ~4.5초)
+  const requestBody = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: Math.min(maxLen * 5, 4096),
+      topP: 0.8,
+      topK: 40,
     },
-    20000
-  )
+  })
 
-  if (!res.ok) {
-    const errBody = await res.text()
-    console.error('[gemini] generateAnswer error:', res.status, errBody)
+  let res: Response | null = null
+  const maxAttempts = 3
+  const retryDelays = [800, 1500] // 1차 실패 후 800ms, 2차 실패 후 1500ms
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    res = await fetchWithTimeout(
+      `${GEMINI_API_BASE}/${CHAT_MODEL}:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
+        body: requestBody,
+      },
+      attempt === 0 ? 8000 : 6000  // 1차는 8초, 재시도는 6초로 단축
+    )
+
+    if (res.ok) break
+
+    const isRetryable = res.status === 503 || res.status === 429 || res.status === 500 || res.status === 502
+    if (!isRetryable || attempt === maxAttempts - 1) break
+
+    console.log(`[gemini] ${res.status} 에러, ${retryDelays[attempt]}ms 후 재시도 (${attempt + 2}/${maxAttempts})`)
+    await new Promise(r => setTimeout(r, retryDelays[attempt]))
+  }
+
+  if (!res || !res.ok) {
+    const errBody = res ? await res.text() : 'No response'
+    console.error('[gemini] generateAnswer error:', res?.status, errBody)
     return fallbackMsg
   }
 
@@ -207,6 +224,7 @@ ${question}
   const answer = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? ''
   return answer || fallbackMsg
 }
+
 
 // ─────────────────────────────────────────
 // ─────────────────────────────────────────
