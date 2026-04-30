@@ -302,6 +302,51 @@ export default function FAQPage() {
   const pct = limit === -1 ? 0 : Math.round((total / limit) * 100)
   const barColor = pct >= 100 ? '#EF4444' : pct >= 80 ? '#F59E0B' : '#4F46E5'
 
+    // ── 엑셀 다운로드 ──
+  const handleDownloadExcel = async () => {
+    try {
+      toast.info('엑셀 파일 생성 중...')
+      const params: any = { page: 1, limit: 10000 }
+      if (filterCat) params.category = filterCat
+      if (searchQuery.trim()) params.search = searchQuery.trim()
+      const res: any = await api.getDocuments(params)
+      const allDocs = res?.data?.items || res?.items || res?.data || []
+
+      if (!allDocs.length) {
+        toast.error('다운로드할 FAQ가 없습니다')
+        return
+      }
+
+      const data = allDocs.map((doc: any, idx: number) => ({
+        'No.': idx + 1,
+        '질문': doc.question || '',
+        '답변': doc.answer || '',
+        '카테고리': doc.category || '미분류',
+        '상태': doc.is_active ? '활성' : '비활성',
+        '등록일': (doc.created_at || '').split('T')[0],
+      }))
+
+      const ws = XLSX.utils.json_to_sheet(data)
+      ws['!cols'] = [
+        { wch: 5 }, { wch: 35 }, { wch: 60 },
+        { wch: 12 }, { wch: 8 }, { wch: 12 }
+      ]
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'FAQ')
+
+      const today = new Date().toISOString().split('T')[0]
+      const tenantName = tenant?.name || 'FAQ'
+      XLSX.writeFile(wb, `FAQ_${tenantName}_${today}.xlsx`)
+
+      toast.success(`${allDocs.length}개의 FAQ를 다운로드했습니다`)
+    } catch (e) {
+      console.error('Excel download error:', e)
+      toast.error('엑셀 다운로드에 실패했습니다')
+    }
+  }
+
+
   const fetchDocs = useCallback(async () => {
     setLoadingList(true)
     try {
