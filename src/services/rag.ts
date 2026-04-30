@@ -175,13 +175,14 @@ async function getTenantSettings(tenantId: string, env: Bindings): Promise<any |
       fallback_message: string; system_prompt: string; response_tone: string
       max_response_length: number; business_hours_enabled: number
       business_hours: string; off_hours_message: string
-    }>(env,
-      `SELECT id, is_active, bot_name, greeting_message, fallback_message,
+        }>(env,
+      `SELECT id, is_active, plan, bot_name, greeting_message, fallback_message,
               system_prompt, response_tone, max_response_length,
               business_hours_enabled, business_hours, off_hours_message
        FROM tenants WHERE id = ? AND is_deleted = 0 LIMIT 1`,
       tenantId
     )
+
     if (!data) return null
 
     // JSON 파싱
@@ -228,34 +229,56 @@ export async function processMessage(
   const fallbackMsg = tenant.fallback_message || '죄송합니다. 잘 이해하지 못했습니다. 담당자에게 문의해주세요.'
 
 
-  // ── Step 1-1: 시나리오 매칭 (키워드 일치시 즉시 반환 - Gemini API 호출 없음) ──
+    // ── Step 1-1: 시나리오 매칭 (키워드 일치시 즉시 반환 - Gemini API 호출 없음) ──
+  // - 정렬: sort_order ASC (낮을수록 우선), 같으면 created_at ASC
+  // - 응답: BASIC = 첫 번째만, PRO/MASTER = 랜덤 응답 (응답이 배열일 경우)
   try {
     const { data: scenarioRows } = await dbAll<{
       id: string; trigger_keywords: string; response_template: string; type: string
     }>(env,
-      `SELECT id, trigger_keywords, response_template, type FROM scenarios WHERE tenant_id = ? AND is_active = 1 AND response_template != ''`,
+      `SELECT id, trigger_keywords, response_template, type FROM scenarios WHERE tenant_id = ? AND is_active = 1 AND response_template != '' ORDER BY sort_order ASC, created_at ASC`,
       tenantId
     )
     if (scenarioRows && scenarioRows.length > 0) {
       const msgLower = userMessage.toLowerCase()
+      const plan = (tenant.plan || 'basic').toLowerCase()
       for (const sc of scenarioRows) {
         let keywords: string[] = []
         try { keywords = JSON.parse(sc.trigger_keywords) } catch {}
         const matched = keywords.some(kw => kw && msgLower.includes(kw.toLowerCase()))
         if (matched) {
+          // 응답 템플릿 파싱: JSON 배열이면 배열로, 아니면 단일 텍스트로
+          let responses: string[] = []
+          try {
+            const parsed = JSON.parse(sc.response_template)
+            responses = Array.isArray(parsed) ? parsed.filter(r => r && typeof r === 'string') : [sc.response_template]
+          } catch {
+            responses = [sc.response_template]
+          }
+          if (responses.length === 0) responses = [sc.response_template]
+
+          // 요금제별 응답 선택: BASIC = 첫 번째, PRO/MASTER = 랜덤
+          let answer: string
+          if (plan === 'basic') {
+            answer = responses[0]
+          } else {
+            answer = responses[Math.floor(Math.random() * responses.length)]
+          }
+
           await saveChatLog(env, {
             tenantId, sessionId, userMessage,
-            botResponse: sc.response_template,
+            botResponse: answer,
             intent: sc.type || 'SCENARIO',
             channel, isAnswered: true, responseTime: 0
           })
-          return { answer: sc.response_template, intent: sc.type || 'SCENARIO', isAnswered: true, responseTime: 0 }
+          return { answer, intent: sc.type || 'SCENARIO', isAnswered: true, responseTime: 0 }
         }
       }
     }
   } catch (e) {
     console.error('[rag] scenario match error:', e)
   }
+
 
   // ── Step 2: 운영시간 체크 ─────────────────────────
   if (tenant.business_hours_enabled) {
