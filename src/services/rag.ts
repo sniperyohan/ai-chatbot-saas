@@ -232,20 +232,28 @@ export async function processMessage(
     // ── Step 1-1: 시나리오 매칭 (키워드 일치시 즉시 반환 - Gemini API 호출 없음) ──
   // - 정렬: sort_order ASC (낮을수록 우선), 같으면 created_at ASC
   // - 응답: BASIC = 첫 번째만, PRO/MASTER = 랜덤 응답 (응답이 배열일 경우)
+    console.log('[SCENARIO-DEBUG] start | tenant:', tenantId, '| msg:', userMessage)
   try {
-    const { data: scenarioRows } = await dbAll<{
+    const sqlResult = await dbAll<{
       id: string; trigger_keywords: string; response_template: string; type: string
     }>(env,
       `SELECT id, trigger_keywords, response_template, type FROM scenarios WHERE tenant_id = ? AND is_active = 1 AND response_template != '' ORDER BY sort_order ASC, created_at ASC`,
       tenantId
     )
+    console.log('[SCENARIO-DEBUG] sql result:', JSON.stringify(sqlResult).slice(0, 2000))
+    const scenarioRows = sqlResult.data
     if (scenarioRows && scenarioRows.length > 0) {
+      console.log('[SCENARIO-DEBUG] row count:', scenarioRows.length)
+
       const msgLower = userMessage.toLowerCase()
-      const plan = (tenant.plan || 'basic').toLowerCase()
-      for (const sc of scenarioRows) {
+      const plan = String((tenant && (tenant as any).plan) || 'basic').toLowerCase()
+
+           for (const sc of scenarioRows) {
         let keywords: string[] = []
         try { keywords = JSON.parse(sc.trigger_keywords) } catch {}
+        console.log('[SCENARIO-DEBUG] checking sc:', sc.id, '| keywords:', JSON.stringify(keywords), '| msgLower:', msgLower)
         const matched = keywords.some(kw => kw && msgLower.includes(kw.toLowerCase()))
+        console.log('[SCENARIO-DEBUG] matched:', matched)
         if (matched) {
           // 응답 템플릿 파싱: JSON 배열이면 배열로, 아니면 단일 텍스트로
           let responses: string[] = []
@@ -266,12 +274,17 @@ export async function processMessage(
           }
 
           await saveChatLog(env, {
-            tenantId, sessionId, userMessage,
-            botResponse: answer,
+            tenant_id: tenantId,
+            session_id: sessionId,
+            user_message: userMessage,
+            bot_response: answer,
             intent: sc.type || 'SCENARIO',
-            channel, isAnswered: true, responseTime: 0
+            channel,
+            is_answered: true,
+            response_time: Date.now() - startTime
           })
-          return { answer, intent: sc.type || 'SCENARIO', isAnswered: true, responseTime: 0 }
+          return { answer, intent: sc.type || 'SCENARIO', isAnswered: true, responseTime: Date.now() - startTime }
+
         }
       }
     }
@@ -351,8 +364,28 @@ export async function processMessage(
           .join('\n\n')
       : ''
 
-    // ── Step 6: 최종 답변 생성 ────────────────────────
-    const answer = await generateAnswer(userMessage, context, tenant, env)
+        // ── Step 6: 최종 답변 생성 (4초 타임아웃) ─────────
+    const GEMINI_TIMEOUT_MS = 3000
+    const timeoutPromise = new Promise<string>((_, reject) =>
+      setTimeout(() => reject(new Error('Gemini timeout')), GEMINI_TIMEOUT_MS)
+    )
+    let answer: string
+    try {
+      answer = await Promise.race([
+        generateAnswer(userMessage, context, tenant, env),
+        timeoutPromise
+      ])
+    } catch (timeoutErr) {
+      console.error('[rag] Gemini timeout/error:', timeoutErr)
+      // 타임아웃 시 즉시 fallback 메시지 반환
+      await saveChatLog(env, {
+        tenant_id: tenantId, session_id: sessionId,
+        user_message: userMessage, bot_response: fallbackMsg,
+        intent: 'OTHER', channel, is_answered: false,
+        response_time: Date.now() - startTime,
+      })
+      return { answer: fallbackMsg, intent: 'OTHER', isAnswered: false, responseTime: Date.now() - startTime }
+    }
 
     // ── Step 7: 의도 분류 ─────────────────────────────
     const intent = classifyIntent(userMessage, matchedDocs)
