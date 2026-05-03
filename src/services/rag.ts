@@ -356,8 +356,8 @@ export async function processMessage(
           .join('\n\n')
       : ''
 
-        // ── Step 6: 최종 답변 생성 (4초 타임아웃) ─────────
-    const GEMINI_TIMEOUT_MS = 3000
+        // ── Step 6: 최종 답변 생성 (1.5초 타임아웃) ─────────
+    const GEMINI_TIMEOUT_MS = 1500
     const timeoutPromise = new Promise<string>((_, reject) =>
       setTimeout(() => reject(new Error('Gemini timeout')), GEMINI_TIMEOUT_MS)
     )
@@ -370,12 +370,12 @@ export async function processMessage(
     } catch (timeoutErr) {
       console.error('[rag] Gemini timeout/error:', timeoutErr)
       // 타임아웃 시 즉시 fallback 메시지 반환
-      await saveChatLog(env, {
+      saveChatLog(env, {
         tenant_id: tenantId, session_id: sessionId,
         user_message: userMessage, bot_response: fallbackMsg,
         intent: 'OTHER', channel, is_answered: false,
         response_time: Date.now() - startTime,
-      })
+      }).catch(err => console.error('[rag] saveChatLog error:', err))
       return { answer: fallbackMsg, intent: 'OTHER', isAnswered: false, responseTime: Date.now() - startTime }
     }
 
