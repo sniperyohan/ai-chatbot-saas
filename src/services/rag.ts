@@ -76,7 +76,6 @@ export async function searchSimilarDocuments(
         return { ...doc, similarity }
       })
       .filter(doc => {
-        console.log('[RAG DEBUG] question:', doc.question, '| similarity:', doc.similarity)
         return doc.similarity >= MATCH_THRESHOLD
       })
       .sort((a, b) => b.similarity - a.similarity)
@@ -232,28 +231,21 @@ export async function processMessage(
     // ── Step 1-1: 시나리오 매칭 (키워드 일치시 즉시 반환 - Gemini API 호출 없음) ──
   // - 정렬: sort_order ASC (낮을수록 우선), 같으면 created_at ASC
   // - 응답: BASIC = 첫 번째만, PRO/MASTER = 랜덤 응답 (응답이 배열일 경우)
-    console.log('[SCENARIO-DEBUG] start | tenant:', tenantId, '| msg:', userMessage)
   try {
-    const sqlResult = await dbAll<{
+    const { data: scenarioRows } = await dbAll<{
       id: string; trigger_keywords: string; response_template: string; type: string
     }>(env,
       `SELECT id, trigger_keywords, response_template, type FROM scenarios WHERE tenant_id = ? AND is_active = 1 AND response_template != '' ORDER BY sort_order ASC, created_at ASC`,
       tenantId
     )
-    console.log('[SCENARIO-DEBUG] sql result:', JSON.stringify(sqlResult).slice(0, 2000))
-    const scenarioRows = sqlResult.data
     if (scenarioRows && scenarioRows.length > 0) {
-      console.log('[SCENARIO-DEBUG] row count:', scenarioRows.length)
-
       const msgLower = userMessage.toLowerCase()
       const plan = String((tenant && (tenant as any).plan) || 'basic').toLowerCase()
 
            for (const sc of scenarioRows) {
         let keywords: string[] = []
         try { keywords = JSON.parse(sc.trigger_keywords) } catch {}
-        console.log('[SCENARIO-DEBUG] checking sc:', sc.id, '| keywords:', JSON.stringify(keywords), '| msgLower:', msgLower)
         const matched = keywords.some(kw => kw && msgLower.includes(kw.toLowerCase()))
-        console.log('[SCENARIO-DEBUG] matched:', matched)
         if (matched) {
           // 응답 템플릿 파싱: JSON 배열이면 배열로, 아니면 단일 텍스트로
           let responses: string[] = []
