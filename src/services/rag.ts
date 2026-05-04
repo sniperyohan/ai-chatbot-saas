@@ -414,7 +414,7 @@ ${optionsText}
       : ''
 
           // ── Step 5.5: 고유사도 FAQ 직접 반환 (Gemini 호출 회피)
-    const HIGH_CONFIDENCE_THRESHOLD = 0.75
+    const HIGH_CONFIDENCE_THRESHOLD = 0.70
     if (finalDocs.length > 0 && finalDocs[0].similarity >= HIGH_CONFIDENCE_THRESHOLD) {
       console.log('[rag] high confidence FAQ match:', finalDocs[0].similarity.toFixed(4), '→ direct return')
       const answer = finalDocs[0].answer
