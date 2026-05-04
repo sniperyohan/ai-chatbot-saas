@@ -5,9 +5,6 @@
 // GET  /api/admin/settings
 // PUT  /api/admin/settings
 // GET  /api/admin/stats
-// GET  /api/admin/scenarios
-// POST /api/admin/scenarios
-// PUT  /api/admin/scenarios/:id
 // GET  /api/admin/subscription
 // POST /api/admin/payment-request
 // POST /api/admin/faq/excel
@@ -340,60 +337,7 @@ tenant.get('/stats', async (c) => {
   })
 })
 
-// ─────────────────────────────────────────
-// GET /api/admin/scenarios
-// ─────────────────────────────────────────
-tenant.get('/scenarios', async (c) => {
-  const tenantId = c.get('tenantId')!
-  const { data, error } = await dbAll<any>(c.env,
-    'SELECT * FROM scenarios WHERE tenant_id = ? ORDER BY created_at ASC',
-    tenantId
-  )
-  if (error) return c.json({ success: false, error: String(error) }, 500)
-  return c.json({ success: true, data: data || [] })
-})
 
-// POST /api/admin/scenarios
-tenant.post('/scenarios', async (c) => {
-  let body: Record<string, unknown>
-  try { body = await c.req.json() } catch { return c.json({ success: false, error: '잘못된 요청' }, 400) }
-  const tenantId = c.get('tenantId')!
-  const id = generateId()
-  const now = new Date().toISOString()
-  const { error } = await dbRun(c.env,
-    `INSERT INTO scenarios (id, tenant_id, name, type, is_active, trigger_keywords, response_template, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    id, tenantId, String(body.name || ''), String(body.type || 'custom'), body.is_active !== false ? 1 : 0, JSON.stringify(body.trigger_keywords || []), String(body.response_template || ''), now, now
-  )
-  if (error) return c.json({ success: false, error: String(error) }, 500)
-  return c.json({ success: true, data: { id, ...body, tenant_id: tenantId, created_at: now, updated_at: now } }, 201)
-})
-
-// PUT /api/admin/scenarios/:id
-tenant.put('/scenarios/:id', async (c) => {
-  const id = c.req.param('id')
-  const tenantId = c.get('tenantId')!
-  let body: Record<string, unknown>
-  try { body = await c.req.json() } catch { return c.json({ success: false, error: '잘못된 요청' }, 400) }
-  const now = new Date().toISOString()
-  const { error } = await dbRun(c.env,
-    `UPDATE scenarios SET name = ?, type = ?, is_active = ?, trigger_keywords = ?, response_template = ?, updated_at = ? WHERE id = ? AND tenant_id = ?`,
-    String(body.name || ''), String(body.type || 'custom'), body.is_active !== false ? 1 : 0, JSON.stringify(body.trigger_keywords || []), String(body.response_template || ''), now, id, tenantId
-  )
-  if (error) return c.json({ success: false, error: String(error) }, 500)
-  return c.json({ success: true })
-})
-
-// DELETE /api/admin/scenarios/:id
-tenant.delete('/scenarios/:id', async (c) => {
-  const id = c.req.param('id')
-  const tenantId = c.get('tenantId')!
-  const { error } = await dbRun(c.env,
-    'DELETE FROM scenarios WHERE id = ? AND tenant_id = ?',
-    id, tenantId
-  )
-  if (error) return c.json({ success: false, error: String(error) }, 500)
-  return c.json({ success: true })
-})
 
 // ─────────────────────────────────────────
 // GET /api/admin/subscription

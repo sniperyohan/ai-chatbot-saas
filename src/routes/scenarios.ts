@@ -93,6 +93,8 @@ router.post('/', async (c) => {
     icon, description, color, sort_order,
     is_active,
   } = body
+  console.log('[POST scenario] body:', JSON.stringify(body))
+  console.log('[POST scenario] description:', description, '| typeof:', typeof description)
 
   const resolvedType = type || scenario_type
   if (!resolvedType) return c.json({ success: false, error: '타입은 필수입니다.' }, 400)
@@ -155,6 +157,8 @@ router.put('/:id', async (c) => {
     icon, description, color, sort_order,
     is_active,
   } = body
+  console.log('[PUT scenario] body:', JSON.stringify(body))
+  console.log('[PUT scenario] description:', description, '| typeof:', typeof description)
 
   const putType = type || scenario_type
 
