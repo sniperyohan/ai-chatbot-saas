@@ -338,3 +338,39 @@ export async function refineDocument(
     return { refined_question: question, refined_answer: answer }
   }
 }
+
+// ─────────────────────────────────────────
+// 시나리오 분류기 (경량 함수)
+// - 시스템 프롬프트, 재시도 없음
+// - 짧은 응답 (max 5 토큰)
+// - 빠른 응답 (1초 이내 기대)
+// ─────────────────────────────────────────
+export async function classifyScenario(
+  prompt: string,
+  env: { GEMINI_API_KEY: string }
+): Promise<string> {
+  const apiKey = env.GEMINI_API_KEY
+  if (!apiKey) throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.')
+
+const url = `${GEMINI_API_BASE}/${CHAT_MODEL}:generateContent?key=${apiKey}`
+  const requestBody = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: 5,
+      candidateCount: 1,
+    },
+  })
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: requestBody,
+  })
+  if (!res.ok) {
+    throw new Error(`classifier API ${res.status}`)
+  }
+  const data: any = await res.json()
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+  return String(text).trim()
+}

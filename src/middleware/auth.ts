@@ -92,6 +92,18 @@ export async function adminAuthMiddleware(c: Context<Env>, next: Next) {
     c.set('tenantId', tenantId)
     c.set('tenantEmail', tenantEmail)
     c.set('role', 'tenant_admin')
+        // tenant 객체 전체 조회해 set (scenarios 등 다른 라우터에서 c.get('tenant') 사용)
+    if (tenantId) {
+      const { dbGet } = await import('../lib/db')
+      const { data: tenantData } = await dbGet<any>(c.env,
+        'SELECT * FROM tenants WHERE id = ? AND is_deleted = 0 LIMIT 1',
+        tenantId
+      )
+      if (tenantData) {
+        c.set('tenant', tenantData)
+      }
+    }
+
     await next()
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
