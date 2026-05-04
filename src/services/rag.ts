@@ -228,9 +228,11 @@ export async function processMessage(
   const fallbackMsg = tenant.fallback_message || '죄송합니다. 잘 이해하지 못했습니다. 담당자에게 문의해주세요.'
 
 
-    // ── Step 1-1: 시나리오 매칭 (키워드 일치시 즉시 반환 - Gemini API 호출 없음) ──
+    // ── Step 1-1: 시나리오 매칭 (점수 기반 + AI 종합 판단) ──
   // - 정렬: sort_order ASC (낮을수록 우선), 같으면 created_at ASC
-  // - 응답: BASIC = 첫 번째만, PRO/MASTER = 랜덤 응답 (응답이 배열일 경우)
+  // - 매칭 점수: 사용자 메시지에 포함된 키워드 개수
+  // - 단일 우위: 즉시 응답 (빠름, Gemini 호출 없음)
+  // - 동점/근접: AI가 컨텍스트 보고 종합 판단
   try {
     const { data: scenarioRows } = await dbAll<{
       id: string; trigger_keywords: string; response_template: string; type: string
@@ -242,41 +244,96 @@ export async function processMessage(
       const msgLower = userMessage.toLowerCase()
       const plan = String((tenant && (tenant as any).plan) || 'basic').toLowerCase()
 
-           for (const sc of scenarioRows) {
+      // 모든 시나리오에 대해 매칭 점수 계산
+      const scoredScenarios = scenarioRows.map(sc => {
         let keywords: string[] = []
         try { keywords = JSON.parse(sc.trigger_keywords) } catch {}
-        const matched = keywords.some(kw => kw && msgLower.includes(kw.toLowerCase()))
-        if (matched) {
-          // 응답 템플릿 파싱: JSON 배열이면 배열로, 아니면 단일 텍스트로
+        // 매칭된 키워드 개수가 점수
+        const score = keywords.filter(kw => kw && msgLower.includes(kw.toLowerCase())).length
+        return { sc, score, keywords }
+      }).filter(item => item.score > 0)
+       .sort((a, b) => b.score - a.score)  // 점수 높은 순
+
+      if (scoredScenarios.length > 0) {
+        // 응답 템플릿 파싱 헬퍼
+        const parseResponses = (template: string): string[] => {
           let responses: string[] = []
           try {
-            const parsed = JSON.parse(sc.response_template)
-            responses = Array.isArray(parsed) ? parsed.filter(r => r && typeof r === 'string') : [sc.response_template]
+            const parsed = JSON.parse(template)
+            responses = Array.isArray(parsed) ? parsed.filter(r => r && typeof r === 'string') : [template]
           } catch {
-            responses = [sc.response_template]
+            responses = [template]
           }
-          if (responses.length === 0) responses = [sc.response_template]
+          return responses.length > 0 ? responses : [template]
+        }
 
-          // 요금제별 응답 선택: BASIC = 첫 번째, PRO/MASTER = 랜덤
-          let answer: string
-          if (plan === 'basic') {
-            answer = responses[0]
-          } else {
-            answer = responses[Math.floor(Math.random() * responses.length)]
-          }
+        const top = scoredScenarios[0]
+        const second = scoredScenarios[1]
+        const isAmbiguous = scoredScenarios.length >= 2 && (top.score - second.score <= 1)
+
+        if (!isAmbiguous) {
+          // 단일 우위: 즉시 응답 (빠름)
+          const responses = parseResponses(top.sc.response_template)
+          const answer = plan === 'basic' ? responses[0] : responses[Math.floor(Math.random() * responses.length)]
 
           await saveChatLog(env, {
             tenant_id: tenantId,
             session_id: sessionId,
             user_message: userMessage,
             bot_response: answer,
-            intent: sc.type || 'SCENARIO',
+            intent: top.sc.type || 'SCENARIO',
             channel,
             is_answered: true,
             response_time: Date.now() - startTime
           })
-          return { answer, intent: sc.type || 'SCENARIO', isAnswered: true, responseTime: Date.now() - startTime }
+          return { answer, intent: top.sc.type || 'SCENARIO', isAnswered: true, responseTime: Date.now() - startTime }
+        }
 
+        // 동점/근접: AI에게 종합 판단 요청 (상위 3개까지)
+        console.log('[rag] ambiguous scenarios, calling AI:', scoredScenarios.slice(0, 3).map(s => ({ type: s.sc.type, score: s.score })))
+        const topScenarios = scoredScenarios.slice(0, 3)
+        const aiContext = topScenarios.map((item, i) => {
+          const responses = parseResponses(item.sc.response_template)
+          return `[시나리오 ${i + 1}: ${item.sc.type}]\n${responses[0]}`
+        }).join('\n\n---\n\n')
+
+        // AI 호출 (1.5초 타임아웃)
+        const GEMINI_TIMEOUT_MS = 1500
+        const timeoutPromise = new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error('Gemini timeout')), GEMINI_TIMEOUT_MS)
+        )
+        try {
+          const aiAnswer = await Promise.race([
+            generateAnswer(userMessage, aiContext, tenant, env),
+            timeoutPromise
+          ])
+          await saveChatLog(env, {
+            tenant_id: tenantId,
+            session_id: sessionId,
+            user_message: userMessage,
+            bot_response: aiAnswer,
+            intent: top.sc.type || 'SCENARIO',
+            channel,
+            is_answered: true,
+            response_time: Date.now() - startTime
+          })
+          return { answer: aiAnswer, intent: top.sc.type || 'SCENARIO', isAnswered: true, responseTime: Date.now() - startTime }
+        } catch (aiErr) {
+          // AI 실패 시 가장 높은 점수의 시나리오 응답으로 폴백
+          console.error('[rag] AI judgment failed, using top score:', aiErr)
+          const responses = parseResponses(top.sc.response_template)
+          const answer = plan === 'basic' ? responses[0] : responses[Math.floor(Math.random() * responses.length)]
+          await saveChatLog(env, {
+            tenant_id: tenantId,
+            session_id: sessionId,
+            user_message: userMessage,
+            bot_response: answer,
+            intent: top.sc.type || 'SCENARIO',
+            channel,
+            is_answered: true,
+            response_time: Date.now() - startTime
+          })
+          return { answer, intent: top.sc.type || 'SCENARIO', isAnswered: true, responseTime: Date.now() - startTime }
         }
       }
     }

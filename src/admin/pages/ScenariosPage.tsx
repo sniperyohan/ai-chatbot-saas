@@ -50,11 +50,20 @@ export default function ScenariosPage() {
   }
 
   const addKeyword = (type: string) => {
-    const kw = (newKeywords[type] || '').trim()
-    if (!kw) return
+    const raw = (newKeywords[type] || '').trim()
+    if (!raw) return
+    // 쉼표(,) 또는 줄바꿈(\n)으로 여러 키워드 한 번에 추가
+    const inputs = raw.split(/[,\n]/).map(k => k.trim()).filter(k => k.length > 0)
+    if (inputs.length === 0) return
     const s = scenarios[type]
-    if ((s.trigger_keywords || []).includes(kw)) return
-    update(type, 'trigger_keywords', [...(s.trigger_keywords || []), kw])
+    const existing = s.trigger_keywords || []
+    // 중복 제거 후 추가
+    const toAdd = inputs.filter(k => !existing.includes(k))
+    if (toAdd.length === 0) {
+      setNewKeywords(prev => ({ ...prev, [type]: '' }))
+      return
+    }
+    update(type, 'trigger_keywords', [...existing, ...toAdd])
     setNewKeywords(prev => ({ ...prev, [type]: '' }))
   }
 
@@ -67,10 +76,12 @@ export default function ScenariosPage() {
     setSaving(type)
     try {
       const s = scenarios[type]
+      // type 필드를 명시적으로 추가 (DB 기본값 'custom' 회피)
+      const payload = { ...s, type, scenario_type: type }
       if (s.id) {
-        await api.updateScenario(s.id, s)
+        await api.updateScenario(s.id, payload)
       } else {
-        const res = await api.saveScenario(s)
+        const res = await api.saveScenario(payload)
         update(type, 'id', res.data?.id)
       }
       toast.success('시나리오가 저장되었습니다.')
@@ -142,7 +153,8 @@ export default function ScenariosPage() {
                     onChange={e => setNewKeywords(prev => ({ ...prev, [type]: e.target.value }))}
                     onKeyDown={e => { if (e.key === 'Enter') addKeyword(type) }}
                     style={{ ...S.input, flex: 1, minHeight: '38px', fontSize: '13px' }}
-                    placeholder="키워드 입력 후 Enter 또는 추가"
+                    placeholder="키워드 입력 (쉼표로 여러 개 입력 가능)"
+
                   />
                   <button onClick={() => addKeyword(type)} style={{ ...S.btnSecondary, padding: '8px 14px', minHeight: '38px', fontSize: '13px' }}>
                     <Plus size={14}/>
