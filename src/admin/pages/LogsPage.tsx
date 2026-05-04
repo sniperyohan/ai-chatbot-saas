@@ -46,18 +46,33 @@ export default function LogsPage() {
 
   const addToFAQ = async (log: any) => {
     try {
-      const ref = await api.refineDocument(log.user_message, log.bot_answer)
+      const userMsg = log.user_message || ''
+      const botMsg = log.bot_response || log.bot_answer || ''
+
+      if (!userMsg.trim() || !botMsg.trim()) {
+        toast.error('질문 또는 답변이 비어 있습니다')
+        return
+      }
+
+      const ref = await api.refineDocument(userMsg, botMsg)
+      const refinedQ = ref?.data?.refined_question || userMsg
+      const refinedA = ref?.data?.refined_answer || botMsg
+
       await api.embedDocument({
-        original_question: log.user_message,
-        original_answer: log.bot_answer,
-        refined_question: ref.data.refined.question,
-        refined_answer: ref.data.refined.answer,
-        content: `${ref.data.refined.question}\n${ref.data.refined.answer}`,
-        category: '일반', language: log.detected_language || 'ko', is_ai_refined: true,
+        original_question: userMsg,
+        original_answer: botMsg,
+        refined_question: refinedQ,
+        refined_answer: refinedA,
+        content: `${refinedQ}\n${refinedA}`,
+        category: '일반',
+        language: log.detected_language || 'ko',
+        is_ai_refined: true,
       })
       toast.success('FAQ에 추가되었습니다!')
       setSelected(null)
+      fetchLogs()
     } catch (e: any) {
+      console.error('[addToFAQ] error:', e)
       toast.error(e.message || 'FAQ 추가 실패')
     }
   }

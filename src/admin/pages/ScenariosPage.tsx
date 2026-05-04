@@ -10,6 +10,7 @@ const SCENARIO_TYPES = [
   { type: 'reservation', icon: '📅', title: '예약/상담 안내', color: '#3B82F6', desc: '예약이나 상담 요청 시 안내합니다.' },
   { type: 'payment',     icon: '💳', title: '결제/환불 안내', color: '#8B5CF6', desc: '결제 및 환불 관련 질문에 응답합니다.' },
   { type: 'guide',       icon: '📚', title: '이용 가이드',   color: '#F59E0B', desc: '서비스 이용 방법을 안내합니다.' },
+  { type: 'inquiry',     icon: '🔍', title: '예매 내역 조회', color: '#EC4899', desc: '예매 내역 확인 및 상태 조회 시 안내합니다.' },
 ]
 
 export default function ScenariosPage() {
@@ -76,8 +77,17 @@ export default function ScenariosPage() {
     setSaving(type)
     try {
       const s = scenarios[type]
+      const meta = SCENARIO_TYPES.find(t => t.type === type)
       // type 필드를 명시적으로 추가 (DB 기본값 'custom' 회피)
-      const payload = { ...s, type, scenario_type: type }
+      const payload = {
+        ...s,
+        type,
+        scenario_type: type,
+        name: (s.name && s.name.trim()) || meta?.title || type,
+        description: (s.description ?? '') || meta?.desc || '',
+        icon: s.icon || meta?.icon || '💬',
+        color: s.color || meta?.color || '#10B981',
+      }
       if (s.id) {
         await api.updateScenario(s.id, payload)
       } else {
@@ -122,9 +132,107 @@ export default function ScenariosPage() {
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>{icon}</div>
-                  <div>
-                    <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{title}</h3>
-                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>{desc}</p>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        value={s.name ?? ''}
+                        onChange={e => update(type, 'name', e.target.value)}
+                        placeholder={title}
+                        title="클릭하여 카드 이름 편집"
+                        style={{
+                          fontSize: '15px',
+                          fontWeight: 700,
+                          color: 'var(--text-primary)',
+                          background: 'transparent',
+                          border: '1px dashed var(--border)',
+                          borderRadius: '6px',
+                          padding: '4px 28px 4px 8px',
+                          width: '100%',
+                          outline: 'none',
+                          cursor: 'text',
+                          transition: 'all 0.15s',
+                        }}
+                        onFocus={e => {
+                          e.currentTarget.style.borderColor = 'var(--primary, #3B82F6)'
+                          e.currentTarget.style.borderStyle = 'solid'
+                          e.currentTarget.style.background = 'var(--bg-primary, #fff)'
+                        }}
+                        onBlur={e => {
+                          e.currentTarget.style.borderColor = 'var(--border)'
+                          e.currentTarget.style.borderStyle = 'dashed'
+                          e.currentTarget.style.background = 'transparent'
+                        }}
+                        onMouseEnter={e => {
+                          if (document.activeElement !== e.currentTarget) {
+                            e.currentTarget.style.background = 'rgba(0,0,0,0.03)'
+                          }
+                        }}
+                        onMouseLeave={e => {
+                          if (document.activeElement !== e.currentTarget) {
+                            e.currentTarget.style.background = 'transparent'
+                          }
+                        }}
+                      />
+                      <span style={{
+                        position: 'absolute',
+                        right: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        fontSize: '12px',
+                        opacity: 0.5,
+                        pointerEvents: 'none',
+                      }}>✏️</span>
+                    </div>
+
+                    <div style={{ position: 'relative', marginTop: '6px' }}>
+                      <input
+                        value={s.description ?? ''}
+                        onChange={e => update(type, 'description', e.target.value)}
+                        placeholder={desc}
+                        title="클릭하여 설명 편집"
+                        style={{
+                          fontSize: '12px',
+                          color: 'var(--text-secondary)',
+                          background: 'transparent',
+                          border: '1px dashed var(--border)',
+                          borderRadius: '6px',
+                          padding: '3px 28px 3px 8px',
+                          width: '100%',
+                          outline: 'none',
+                          cursor: 'text',
+                          transition: 'all 0.15s',
+                        }}
+                        onFocus={e => {
+                          e.currentTarget.style.borderColor = 'var(--primary, #3B82F6)'
+                          e.currentTarget.style.borderStyle = 'solid'
+                          e.currentTarget.style.background = 'var(--bg-primary, #fff)'
+                        }}
+                        onBlur={e => {
+                          e.currentTarget.style.borderColor = 'var(--border)'
+                          e.currentTarget.style.borderStyle = 'dashed'
+                          e.currentTarget.style.background = 'transparent'
+                        }}
+                        onMouseEnter={e => {
+                          if (document.activeElement !== e.currentTarget) {
+                            e.currentTarget.style.background = 'rgba(0,0,0,0.03)'
+                          }
+                        }}
+                        onMouseLeave={e => {
+                          if (document.activeElement !== e.currentTarget) {
+                            e.currentTarget.style.background = 'transparent'
+                          }
+                        }}
+                      />
+                      <span style={{
+                        position: 'absolute',
+                        right: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        fontSize: '11px',
+                        opacity: 0.5,
+                        pointerEvents: 'none',
+                      }}>✏️</span>
+                    </div>
                   </div>
                 </div>
                 {/* Toggle */}
