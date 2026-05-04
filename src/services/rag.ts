@@ -413,6 +413,24 @@ ${optionsText}
           .join('\n\n')
       : ''
 
+          // ── Step 5.5: 고유사도 FAQ 직접 반환 (Gemini 호출 회피)
+    const HIGH_CONFIDENCE_THRESHOLD = 0.75
+    if (finalDocs.length > 0 && finalDocs[0].similarity >= HIGH_CONFIDENCE_THRESHOLD) {
+      console.log('[rag] high confidence FAQ match:', finalDocs[0].similarity.toFixed(4), '→ direct return')
+      const answer = finalDocs[0].answer
+      saveChatLog(env, {
+        tenant_id: tenantId,
+        session_id: sessionId,
+        user_message: userMessage,
+        bot_response: answer,
+        intent: 'FAQ_DIRECT',
+        channel,
+        is_answered: true,
+        response_time: Date.now() - startTime
+      }).catch(err => console.error('[rag] saveChatLog error:', err))
+      return { answer, intent: 'FAQ_DIRECT', isAnswered: true, responseTime: Date.now() - startTime }
+    }
+
         // ── Step 6: 최종 답변 생성 (4초 타임아웃) ─────────
     const GEMINI_TIMEOUT_MS = 4000
     const timeoutPromise = new Promise<string>((_, reject) =>

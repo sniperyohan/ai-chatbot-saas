@@ -186,8 +186,8 @@ ${question}
   })
 
   let res: Response | null = null
-  const maxAttempts = 3
-  const retryDelays = [800, 1500] // 1차 실패 후 800ms, 2차 실패 후 1500ms
+  const maxAttempts = 2
+  const retryDelays = [300] // 카카오톡 5초 제한 대응 (재시도 1회만)
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     res = await fetchWithTimeout(
@@ -200,7 +200,7 @@ ${question}
         },
         body: requestBody,
       },
-      attempt === 0 ? 8000 : 6000  // 1차는 8초, 재시도는 6초로 단축
+      attempt === 0 ? 2500 : 1200  // 1차 2.5초, 재시도 1.2초 (총 ~4초)
     )
 
     if (res.ok) break
