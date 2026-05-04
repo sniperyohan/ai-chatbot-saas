@@ -278,7 +278,7 @@ ${optionsText}
 사용자 질문: "${userMessage}"
 답변(숫자만):`
 
-              const CLASSIFY_TIMEOUT_MS = 1500
+              const CLASSIFY_TIMEOUT_MS = 3000
               const classifyTimeout = new Promise<string>((_, reject) =>
                 setTimeout(() => reject(new Error('classifier timeout')), CLASSIFY_TIMEOUT_MS)
               )
@@ -414,7 +414,7 @@ ${optionsText}
       : ''
 
         // ── Step 6: 최종 답변 생성 (4초 타임아웃) ─────────
-    const GEMINI_TIMEOUT_MS = 3000
+    const GEMINI_TIMEOUT_MS = 4000
     const timeoutPromise = new Promise<string>((_, reject) =>
       setTimeout(() => reject(new Error('Gemini timeout')), GEMINI_TIMEOUT_MS)
     )
