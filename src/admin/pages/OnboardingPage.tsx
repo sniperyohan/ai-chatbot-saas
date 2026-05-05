@@ -21,7 +21,7 @@ export default function OnboardingPage() {
   const [copied, setCopied] = useState(false)
 
   const tenantId = tenant?.id || 'YOUR_TENANT_ID'
-  const installCode = `<script src="https://your-domain.pages.dev/widget.js" data-tenant="${tenantId}" defer></script>`
+  const installCode = `<script src="https://ai-chatbot-saas-1cb.pages.dev/widget.js" data-tenant="${tenantId}" defer></script>`
 
   const handleNext = async () => {
     if (step === 1) {
