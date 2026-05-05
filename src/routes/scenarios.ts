@@ -10,8 +10,8 @@ router.use('*', adminAuthMiddleware)
 // 요금제별 시나리오 한도
 // ─────────────────────────────────────────────
 const PLAN_LIMITS: Record<string, { scenarios: number; responses: number }> = {
-  basic:  { scenarios: 5,           responses: 1 },           // 단일 응답
-  pro:    { scenarios: 15,          responses: 5 },           // 랜덤 응답 최대 5개
+  basic:  { scenarios: 10,           responses: 1 },           // 단일 응답
+  pro:    { scenarios: 30,          responses: 5 },           // 랜덤 응답 최대 5개
   master: { scenarios: Number.MAX_SAFE_INTEGER, responses: Number.MAX_SAFE_INTEGER }, // 무제한
 }
 

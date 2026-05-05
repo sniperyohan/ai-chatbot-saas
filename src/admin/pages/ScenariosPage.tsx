@@ -11,6 +11,7 @@ const SCENARIO_TYPES = [
   { type: 'payment',     icon: '💳', title: '결제/환불 안내', color: '#8B5CF6', desc: '결제 및 환불 관련 질문에 응답합니다.' },
   { type: 'guide',       icon: '📚', title: '이용 가이드',   color: '#F59E0B', desc: '서비스 이용 방법을 안내합니다.' },
   { type: 'inquiry',     icon: '🔍', title: '예매 내역 조회', color: '#EC4899', desc: '예매 내역 확인 및 상태 조회 시 안내합니다.' },
+  { type: 'abuse',       icon: '🛡️', title: '부적절한 표현 대응', color: '#EF4444', desc: '욕설/비속어 감지 시 정중한 안내 전송.' },
 ]
 
 export default function ScenariosPage() {
