@@ -28,6 +28,36 @@ async function handleChat(
       intent: 'OTHER', isAnswered: false, responseTime: 0,
     }
   }
+
+  // 🔒 tenant 유효성 검증 (보안: 가짜 tenant_id로 API 비용 오남용 방지)
+  if (!tenantId) {
+    console.warn('[handleChat] empty tenant_id rejected')
+    return {
+      answer: '서비스 이용이 불가합니다. 관리자에게 문의해주세요.',
+      intent: 'OTHER', isAnswered: false, responseTime: 0,
+    }
+  }
+
+  const tenantCheck = await env.DB.prepare(
+    'SELECT id, is_active FROM tenants WHERE id = ? AND (is_deleted IS NULL OR is_deleted = 0) LIMIT 1'
+  ).bind(tenantId).first<{ id: string; is_active: number }>()
+
+  if (!tenantCheck) {
+    console.warn(`[handleChat] invalid tenant_id rejected: ${tenantId} (channel: ${channel})`)
+    return {
+      answer: '서비스 이용이 불가합니다. 관리자에게 문의해주세요.',
+      intent: 'OTHER', isAnswered: false, responseTime: 0,
+    }
+  }
+
+  if (tenantCheck.is_active !== 1) {
+    console.warn(`[handleChat] inactive tenant: ${tenantId}`)
+    return {
+      answer: '서비스가 일시 중단되었습니다. 관리자에게 문의해주세요.',
+      intent: 'OTHER', isAnswered: false, responseTime: 0,
+    }
+  }
+
   return processMessage(tenantId, userMessage, channel, sessionId, env)
 }
 
