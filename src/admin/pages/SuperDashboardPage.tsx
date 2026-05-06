@@ -28,6 +28,7 @@ interface Tenant {
   subscription_end_date?: string | null
   subscription_status?: 'active' | 'pending' | 'expired'
   payment_requested_at?: string | null
+  payment_memo?: string | null
 }
 
 interface DashboardStats {
@@ -1159,10 +1160,14 @@ function ConfirmPaymentModal({ tenant, onClose, onSuccess }: {
           </div>
           <p style={{ fontSize: '14px', color: 'var(--text-primary)', margin: 0, lineHeight: 1.6 }}>
             <strong>{tenant.company_name}</strong>의 입금을 확인하고<br />구독을 1개월 연장합니다.
+            {tenant.payment_memo && (
+              <><br /><span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 600 }}>💰 입금자명: {tenant.payment_memo}</span></>
+            )}
             {tenant.payment_requested_at && (
-              <><br /><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>입금 요청: {formatDateKo(tenant.payment_requested_at)}</span></>
+              <><br /><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>📅 입금 요청: {formatDateKo(tenant.payment_requested_at)}</span></>
             )}
           </p>
+
         </div>
         <ErrBox msg={err} />
         <div style={{ display: 'flex', gap: '10px' }}>
