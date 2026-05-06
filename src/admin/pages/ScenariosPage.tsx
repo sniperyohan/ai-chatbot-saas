@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, X, Save, Loader2, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
+import { Plus, X, Save, Loader2, ToggleLeft, ToggleRight, Trash2, ArrowUp, ArrowDown } from 'lucide-react'
 import { api } from '../lib/api'
 import { useToast } from '../hooks/useToast'
 import ToastContainer from '../components/Toast'
@@ -88,6 +88,39 @@ export default function ScenariosPage() {
       setScenarios({})
     }).finally(() => setLoading(false))
   }
+
+    // 시나리오 순서 변경 (위/아래 화살표)
+  const moveScenario = async (key: string, direction: 'up' | 'down') => {
+    const sorted = Object.values(scenarios).sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    const idx = sorted.findIndex((s: any) => (s._localKey || s.id) === key)
+    if (idx === -1) return
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (targetIdx < 0 || targetIdx >= sorted.length) return
+
+    const a: any = sorted[idx]
+    const b: any = sorted[targetIdx]
+    const aOrder = a.sort_order ?? 0
+    const bOrder = b.sort_order ?? 0
+
+    // UI 즉시 반영
+    setScenarios(prev => {
+      const next = { ...prev }
+      const aKey = a._localKey || a.id
+      const bKey = b._localKey || b.id
+      if (next[aKey]) next[aKey] = { ...next[aKey], sort_order: bOrder }
+      if (next[bKey]) next[bKey] = { ...next[bKey], sort_order: aOrder }
+      return next
+    })
+
+    // DB 저장 (이미 저장된 시나리오만)
+    try {
+      if (a.id && !a._isNew) await api.updateScenario(a.id, { sort_order: bOrder })
+      if (b.id && !b._isNew) await api.updateScenario(b.id, { sort_order: aOrder })
+    } catch (err) {
+      console.error('순서 변경 실패:', err)
+    }
+  }
+
 
   const update = (key: string, field: string, value: any) => {
     setScenarios(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }))
@@ -301,12 +334,28 @@ export default function ScenariosPage() {
                     />
                   </div>
                 </div>
-                <button
-                  onClick={() => update(key, 'is_active', s.is_active ? 0 : 1)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: s.is_active ? color : 'var(--text-secondary)', padding: '4px' }}
-                >
-                  {s.is_active ? <ToggleRight size={28}/> : <ToggleLeft size={28}/>}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', height: '32px', marginTop: '-4px' }}>
+                  <button
+                    onClick={() => moveScenario(key, 'up')}
+                    title="위로 이동"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: s.is_active ? color : 'var(--text-secondary)', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '32px' }}
+                  >
+                    <ArrowUp size={20} strokeWidth={2.5}/>
+                  </button>
+                  <button
+                    onClick={() => moveScenario(key, 'down')}
+                    title="아래로 이동"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: s.is_active ? color : 'var(--text-secondary)', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '32px' }}
+                  >
+                    <ArrowDown size={20} strokeWidth={2.5}/>
+                  </button>
+                  <button
+                    onClick={() => update(key, 'is_active', s.is_active ? 0 : 1)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: s.is_active ? color : 'var(--text-secondary)', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '32px' }}
+                  >
+                    {s.is_active ? <ToggleRight size={28}/> : <ToggleLeft size={28}/>}
+                  </button>
+                </div>
               </div>
 
               {/* 색상 선택 */}
