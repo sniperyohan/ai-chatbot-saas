@@ -66,6 +66,9 @@ export const api = {
     request<any>('POST', '/admin/scenarios', data),
   updateScenario: (id: string, data: Record<string, unknown>) =>
     request<any>('PUT', `/admin/scenarios/${id}`, data),
+  deleteScenario: (id: string) =>
+    request<any>('DELETE', `/admin/scenarios/${id}`),
+
 
   // Bot settings (기존 호환성 유지)
   getTenant: () => request<any>('GET', '/admin/me'),
