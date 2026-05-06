@@ -82,7 +82,8 @@ export const superApi = {
 
   // ── 슈퍼관리자 비밀번호 변경 ──────────────────────
   changePassword: (current_password: string, new_password: string) =>
-    superRequest<any>('PUT', '/password', { current_password, new_password }),
+    superRequest<any>('POST', '/change-password', { current_password, new_password }),
+
 
   // ── API 플랫폼 ────────────────────────────────────
   getPlatformApis: () => superRequest<any>('GET', '/platform-apis'),

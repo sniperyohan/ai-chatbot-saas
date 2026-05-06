@@ -486,7 +486,9 @@ superRouter.put('/tenants/:id/billing', async (c) => {
 superRouter.post('/change-password', async (c) => {
   try {
     const { current_password, new_password } = await c.req.json() as any
-    const superAdminId = c.get('userId')
+    const payload = c.get('jwtPayload') as any
+    const superAdminId = payload?.sub
+
     const { data: admin } = await dbGet(c.env,
       'SELECT id, password_hash FROM super_admins WHERE id=?', superAdminId)
     if (!admin) return c.json({ success: false, error: '관리자를 찾을 수 없습니다.' }, 404)
