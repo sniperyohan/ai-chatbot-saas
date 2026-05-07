@@ -555,6 +555,43 @@ export default function FAQPage() {
     } catch (e: any) { toast.error(e.message) }
     setDeleteConfirm(null)
   }
+    // ── 다중 선택 ──
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === docs.length && docs.length > 0) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(docs.map((d: any) => d.id)))
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds)
+    if (!ids.length) return
+    try {
+      toast.info(`${ids.length}개 삭제 중...`)
+      await Promise.all(ids.map(id => api.deleteDocument(id)))
+      toast.success(`${ids.length}개의 FAQ가 삭제되었습니다.`)
+      setSelectedIds(new Set())
+      fetchDocs()
+    } catch (e: any) {
+      toast.error('일부 항목 삭제에 실패했습니다.')
+      fetchDocs()
+    }
+    setBulkDeleteConfirm(false)
+  }
+
 
   const errorCount = excelRows.filter(r => r.hasError).length
   const validCount = excelRows.filter(r => !r.hasError).length
@@ -860,7 +897,30 @@ export default function FAQPage() {
           {/* ── FAQ 목록 ── */}
           <div style={S.card}>
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>FAQ 목록</h3>
+              <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                FAQ 목록
+                {selectedIds.size > 0 && (
+                  <span style={{ marginLeft: '8px', fontSize: '12px', fontWeight: 500, color: 'var(--primary)' }}>
+                    ({selectedIds.size}개 선택됨)
+                  </span>
+                )}
+              </h3>
+              {selectedIds.size > 0 && (
+                <button
+                  onClick={() => setBulkDeleteConfirm(true)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                    padding: '8px 14px', background: '#DC2626', color: '#fff',
+                    border: 'none', borderRadius: '6px', cursor: 'pointer',
+                    fontSize: '13px', fontWeight: 600, fontFamily: 'inherit',
+                    minHeight: '36px'
+                  }}
+                >
+                  <Trash2 size={14} />
+                  선택 삭제 ({selectedIds.size})
+                </button>
+              )}
+
                             <button
                 onClick={handleDownloadExcel}
                 disabled={total === 0}
@@ -908,6 +968,14 @@ export default function FAQPage() {
                   <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse', minWidth: '500px' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                        <th style={{ textAlign: 'left', paddingBottom: '10px', paddingRight: '12px', width: '36px' }}>
+                          <input
+                            type="checkbox"
+                            checked={docs.length > 0 && selectedIds.size === docs.length}
+                            onChange={toggleSelectAll}
+                            style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                          />
+                        </th>
                         {['상태', '질문', '카테고리', '등록일', ''].map(h => (
                           <th key={h} style={{ textAlign: 'left', paddingBottom: '10px', paddingRight: '12px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{h}</th>
                         ))}
@@ -919,7 +987,7 @@ export default function FAQPage() {
                           onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'var(--bg-primary)'}
                           onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = ''}>
                           {editId === doc.id ? (
-                            <td colSpan={5} style={{ padding: '12px 0' }}>
+                            <td colSpan={6} style={{ padding: '12px 0' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                 <textarea value={editData.question} onChange={e => setEditData(p => ({ ...p, question: e.target.value }))}
                                   style={{ ...S.textarea, height: '56px', fontSize: '12px' }} />
@@ -933,6 +1001,14 @@ export default function FAQPage() {
                             </td>
                           ) : (
                             <>
+                              <td style={{ padding: '12px 12px 12px 0', width: '36px' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIds.has(doc.id)}
+                                  onChange={() => toggleSelect(doc.id)}
+                                  style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                                />
+                              </td>
                               <td style={{ padding: '12px 12px 12px 0', width: '50px' }}>
                                 <button onClick={() => handleToggle(doc)} disabled={togglingId === doc.id}
                                   style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px', color: doc.is_active !== false ? '#059669' : 'var(--text-secondary)' }}
@@ -1012,6 +1088,16 @@ export default function FAQPage() {
           <div style={{ display: 'flex', gap: '8px' }}>
             <button onClick={() => { setConfirmClose(false); setPreviewOpen(false) }} style={{ ...S.btnDanger, flex: 1 }}>취소하기</button>
             <button onClick={() => setConfirmClose(false)} style={{ ...S.btnSecondary, flex: 1 }}>계속 수정</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={bulkDeleteConfirm} onClose={() => setBulkDeleteConfirm(false)} title={`선택한 ${selectedIds.size}개의 FAQ를 삭제할까요?`} size="sm" hideClose>
+        <div style={{ padding: '8px 0 16px' }}>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>삭제된 FAQ는 복구할 수 없습니다.</p>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+            <button onClick={handleBulkDelete} style={{ ...S.btnDanger, flex: 1 }}>{selectedIds.size}개 삭제</button>
+            <button onClick={() => setBulkDeleteConfirm(false)} style={{ ...S.btnSecondary, flex: 1 }}>취소</button>
           </div>
         </div>
       </Modal>
