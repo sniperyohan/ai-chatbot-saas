@@ -410,7 +410,9 @@ export default function DashboardPage() {
   const intentData  = stats ? Object.entries(stats.intent_stats || {}).map(([k, v]: any) => ({ name: IT_LABELS[k] || k, value: v })) : []
 
   const limit = getPlan(tenant?.plan).faqLimit
+  const monthlyLimit = getPlan(tenant?.plan).monthlyAnswers
   const faqCount = stats?.faq_count || tenant?.faq_count || 0
+
   const faqPct = limit === -1 ? 0 : Math.round((faqCount / limit) * 100)
 
   const recentLogs = stats?.recent_logs || []
@@ -427,7 +429,8 @@ export default function DashboardPage() {
         <div style={{ ...S.card }}>
           <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '16px' }}>📊 사용량 현황</h3>
           <UsageBar label="FAQ 등록" current={faqCount} limit={limit} color="#4F46E5"/>
-          <UsageBar label="이번달 대화" current={stats?.month_count || 0} limit={limit === -1 ? -1 : limit * 100} color="#10B981"/>
+          <UsageBar label="이번달 대화" current={stats?.month_count || 0} limit={monthlyLimit} color="#10B981"/>
+
         </div>
       )}
 
