@@ -313,7 +313,12 @@ export default function FAQPage() {
       if (filterCat) params.category = filterCat
       if (searchQuery.trim()) params.search = searchQuery.trim()
       const res: any = await api.getDocuments(params)
-      const allDocs = res?.data?.items || res?.items || res?.data || []
+      let allDocs = res?.data?.items || res?.items || res?.data || []
+
+      // 선택된 항목만 필터링
+      if (selectedIds.size > 0) {
+        allDocs = allDocs.filter((doc: any) => selectedIds.has(doc.id))
+      }
 
       if (!allDocs.length) {
         toast.error('다운로드할 FAQ가 없습니다')
@@ -935,7 +940,7 @@ export default function FAQPage() {
                 title="검색/필터링된 FAQ를 엑셀로 다운로드합니다"
               >
                 <Download size={14} />
-                FAQ 내보내기
+                {selectedIds.size > 0 ? `선택 내보내기 (${selectedIds.size})` : 'FAQ 전체 내보내기'}
               </button>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '200px', position: 'relative' }}>
