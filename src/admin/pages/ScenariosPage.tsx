@@ -30,6 +30,7 @@ interface Scenario {
   color: string
   trigger_keywords: string[]
   response_template: string
+  responses?: string[]   //
   is_active: boolean | number
   sort_order?: number
   _localKey: string  // React key (id || `new_${ts}`)
@@ -73,6 +74,9 @@ export default function ScenariosPage() {
           color: s.color || '#10B981',
           trigger_keywords: kws || [],
           response_template: s.response_template || '',
+          responses: Array.isArray(s.responses) && s.responses.length > 0
+            ? s.responses
+            : (s.response_template ? [s.response_template] : ['']),
           is_active: s.is_active ?? 1,
           sort_order: s.sort_order || 0,
           _localKey: id,
@@ -160,6 +164,7 @@ export default function ScenariosPage() {
         color: s.color || '#10B981',
         trigger_keywords: s.trigger_keywords || [],
         response_template: s.response_template || '',
+        responses: (s.responses || []).map(r => r.trim()).filter(r => r),
         is_active: s.is_active,
         sort_order: s.sort_order || 0,
       }
@@ -220,6 +225,7 @@ export default function ScenariosPage() {
       color: preset?.color || '#10B981',
       trigger_keywords: [],
       response_template: '',
+      responses: [''],
       is_active: 1,
       sort_order: Object.keys(scenarios).length,
       _localKey: tempKey,
@@ -401,15 +407,50 @@ export default function ScenariosPage() {
                 </div>
               </div>
 
-              {/* Response Template */}
+              {/* Response Templates (multi) */}
               <div>
-                <label style={{ ...S.label, marginBottom: '6px' }}>응답 템플릿</label>
-                <textarea
-                  value={s.response_template || ''}
-                  onChange={e => update(key, 'response_template', e.target.value)}
-                  style={{ ...S.textarea, height: '90px', fontSize: '13px' }}
-                  placeholder="이 시나리오에서 사용할 응답을 입력하세요."
-                />
+                <label style={{ ...S.label, marginBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>응답 템플릿</span>
+                  <span style={{ fontSize: '11px', color: '#6B7280', fontWeight: 'normal' }}>
+                    {(s.responses || []).length} / {planLimit.responses === null ? '∞' : planLimit.responses} (랜덤 발송)
+                  </span>
+                </label>
+
+                {(s.responses && s.responses.length > 0 ? s.responses : ['']).map((resp, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                    <textarea
+                      value={resp}
+                      onChange={e => {
+                        const arr = [...(s.responses || [''])]
+                        arr[idx] = e.target.value
+                        update(key, 'responses', arr)
+                      }}
+                      style={{ ...S.textarea, height: '90px', fontSize: '13px', flex: 1 }}
+                      placeholder={`응답 ${idx + 1}`}
+                    />
+                    {(s.responses || []).length > 1 && (
+                      <button
+                        onClick={() => {
+                          const arr = (s.responses || []).filter((_, i) => i !== idx)
+                          update(key, 'responses', arr)
+                        }}
+                        style={{ ...S.btnSecondary, padding: '8px', color: '#EF4444', alignSelf: 'flex-start' }}
+                        title="이 응답 삭제"
+                      >
+                        <Trash2 size={14}/>
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                {(planLimit.responses === null || (s.responses || []).length < planLimit.responses) && (
+                  <button
+                    onClick={() => update(key, 'responses', [...(s.responses || []), ''])}
+                    style={{ ...S.btnSecondary, fontSize: '12px', padding: '6px 12px', marginTop: '4px' }}
+                  >
+                    <Plus size={12}/> 응답 추가
+                  </button>
+                )}
               </div>
 
               {/* Buttons: Save + Delete */}
