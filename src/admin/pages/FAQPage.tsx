@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import * as XLSX from 'xlsx'
 import {
   Upload, Download, Save, Trash2, Pencil, X, Check, Loader2,
   AlertTriangle, BookOpen, Search, ToggleLeft, ToggleRight,
@@ -330,7 +329,9 @@ export default function FAQPage() {
         '등록일': (doc.created_at || '').split('T')[0],
       }))
 
+      const XLSX = await import('xlsx')
       const ws = XLSX.utils.json_to_sheet(data)
+
       ws['!cols'] = [
         { wch: 5 }, { wch: 35 }, { wch: 60 },
         { wch: 12 }, { wch: 8 }, { wch: 12 }
@@ -423,7 +424,8 @@ export default function FAQPage() {
   }
 
   // ── 엑셀 샘플 양식 받기 ──
-  const handleDownloadTemplate = () => {
+  const handleDownloadTemplate = async () => {
+    const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     const headerRow = ['질문', '답변', '카테고리']
     const sampleData = [
@@ -449,8 +451,9 @@ export default function FAQPage() {
     }
 
     const reader = new FileReader()
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
+        const XLSX = await import('xlsx')
         const data = new Uint8Array(e.target?.result as ArrayBuffer)
         const wb = XLSX.read(data, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
