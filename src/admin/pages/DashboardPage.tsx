@@ -411,6 +411,7 @@ export default function DashboardPage() {
 
   const limit = getPlan(tenant?.plan).faqLimit
   const monthlyLimit = getPlan(tenant?.plan).monthlyAnswers
+  const scenarioLimit = getPlan(tenant?.plan).scenarioLimit
   const faqCount = stats?.faq_count || tenant?.faq_count || 0
 
   const faqPct = limit === -1 ? 0 : Math.round((faqCount / limit) * 100)
@@ -430,6 +431,7 @@ export default function DashboardPage() {
           <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '16px' }}>📊 사용량 현황</h3>
           <UsageBar label="FAQ 등록" current={faqCount} limit={limit} color="#4F46E5"/>
           <UsageBar label="이번달 대화" current={stats?.month_count || 0} limit={monthlyLimit} color="#10B981"/>
+          <UsageBar label="시나리오" current={stats?.scenario_count || 0} limit={scenarioLimit} color="#F59E0B"/>
 
         </div>
       )}

@@ -44,6 +44,8 @@ interface PlanData {
   price: number
   faq_limit: number
   chat_limit: number
+  max_chatbots: number
+  response_limit: number
 }
 
 interface PlatformApi {
@@ -530,6 +532,8 @@ function EditPlanModal({ plan, onClose, onSuccess }: {
   const [price, setPrice] = useState(String(plan.price))
   const [faqLimit, setFaqLimit] = useState(String(plan.faq_limit))
   const [chatLimit, setChatLimit] = useState(String(plan.chat_limit))
+  const [scenarioLimit, setScenarioLimit] = useState(String(plan.max_chatbots))
+  const [responseLimit, setResponseLimit] = useState(String(plan.response_limit))
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
@@ -537,13 +541,17 @@ function EditPlanModal({ plan, onClose, onSuccess }: {
     const priceNum = parseInt(price)
     const faqNum = parseInt(faqLimit)
     const chatNum = parseInt(chatLimit)
+    const scenarioNum = parseInt(scenarioLimit)
+    const responseNum = parseInt(responseLimit)
     if (isNaN(priceNum) || priceNum < 0) { setErr('올바른 가격을 입력하세요.'); return }
     if (isNaN(faqNum)) { setErr('FAQ 한도를 입력하세요. (-1 = 무제한)'); return }
     if (isNaN(chatNum)) { setErr('대화 한도를 입력하세요. (-1 = 무제한)'); return }
+    if (isNaN(scenarioNum)) { setErr('시나리오 한도를 입력하세요. (-1 = 무제한)'); return }
+    if (isNaN(responseNum)) { setErr('응답 템플릿 한도를 입력하세요. (-1 = 무제한)'); return }
 
     setLoading(true); setErr('')
     try {
-      await superApi.updatePlan(plan.id, { price: priceNum, faq_limit: faqNum, chat_limit: chatNum })
+      await superApi.updatePlan(plan.id, { price: priceNum, faq_limit: faqNum, chat_limit: chatNum, max_chatbots: scenarioNum, response_limit: responseNum })
       onSuccess(`${plan.plan_name.toUpperCase()} 플랜이 수정되었습니다.`)
       onClose()
     } catch (e: any) {
@@ -572,6 +580,14 @@ function EditPlanModal({ plan, onClose, onSuccess }: {
         <Field label="월 답변 한도 (-1 = 무제한)" required>
           <input type="number" value={chatLimit} onChange={e => setChatLimit(e.target.value)} style={inputStyle} />
           <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>-1 입력 시 무제한</p>
+        </Field>
+        <Field label="시나리오 한도 (-1 = 무제한)" required>
+          <input type="number" value={scenarioLimit} onChange={e => setScenarioLimit(e.target.value)} style={inputStyle} />
+          <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>-1 입력 시 무제한</p>
+        </Field>
+        <Field label="응답 템플릿 한도 (-1 = 무제한)" required>
+          <input type="number" value={responseLimit} onChange={e => setResponseLimit(e.target.value)} style={inputStyle} />
+          <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>시나리오당 응답 개수 · -1 입력 시 무제한</p>
         </Field>
         <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
           <button onClick={onClose} disabled={loading} style={{ ...S.btnSecondary, flex: 1 }}>취소</button>
@@ -1901,6 +1917,8 @@ function PlansTab({ onShowToast }: { onShowToast: (msg: string, type: 'success' 
                 {[
                   { label: 'FAQ 한도', value: formatLimit(plan.faq_limit) },
                   { label: '월 답변 한도', value: formatLimit(plan.chat_limit) },
+                  { label: '시나리오 한도', value: formatLimit(plan.max_chatbots) },
+                  { label: '응답 템플릿 한도', value: formatLimit(plan.response_limit) },
                 ].map(row => (
                   <div key={row.label} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',

@@ -7,6 +7,10 @@ export interface PlanInfo {
   price: number          // 월 요금 (원)
   faqLimit: number       // FAQ 등록 한도 (-1 = 무제한)
   monthlyAnswers: number // 월 답변 한도 (-1 = 무제한)
+  scenarioLimit: number  // 시나리오 한도 (-1 = 무제한)
+  responseLimit: number  // 응답 템플릿 한도 (-1 = 무제한)
+
+
   color: string          // 메인 색상
   bgColor: string        // 배경 색상 (옅은 톤)
   emoji: string          // 이모지 아이콘
@@ -20,7 +24,11 @@ export const PLANS: Record<PlanType, PlanInfo> = {
     price: 99000,
     faqLimit: 50,
     monthlyAnswers: 1000,
+    scenarioLimit: 10,
+    responseLimit: 1,
+
     color: '#3B82F6',
+
     bgColor: 'rgba(59,130,246,0.12)',
     emoji: '📦',
     description: '기본 플랜',
@@ -30,7 +38,11 @@ export const PLANS: Record<PlanType, PlanInfo> = {
     price: 199000,
     faqLimit: 200,
     monthlyAnswers: 5000,
+    scenarioLimit: 30,
+    responseLimit: 5,
+
     color: '#8B5CF6',
+
     bgColor: 'rgba(139,92,246,0.12)',
     emoji: '🚀',
     description: '주문조회 포함',
@@ -40,6 +52,9 @@ export const PLANS: Record<PlanType, PlanInfo> = {
     price: 399000,
     faqLimit: -1,
     monthlyAnswers: -1,
+    scenarioLimit: -1,
+    responseLimit: -1,
+
     color: '#F59E0B',
     bgColor: 'rgba(245,158,11,0.12)',
     emoji: '⭐',
@@ -116,6 +131,9 @@ export async function loadPlansFromDB(api: any): Promise<void> {
         PLANS[key].price = dbPlan.price
         PLANS[key].faqLimit = dbPlan.faq_limit
         PLANS[key].monthlyAnswers = dbPlan.chat_limit
+        PLANS[key].scenarioLimit = dbPlan.max_chatbots
+        PLANS[key].responseLimit = dbPlan.response_limit
+
         // label, color, emoji, description은 코드 값 유지
       }
     })

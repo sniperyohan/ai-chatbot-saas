@@ -270,7 +270,7 @@ tenant.get('/stats', async (c) => {
   const yesterdayStr = new Date(Date.now() + 9 * 3600000 - 86400000).toISOString().slice(0, 10)
   const monthStart   = todayStr.slice(0, 7) + '-01'
 
-  const [todayRow, yesterdayRow, monthRow, totalRow, faqRow, recentRows] = await Promise.all([
+const [todayRow, yesterdayRow, monthRow, totalRow, faqRow, scenarioRow, recentRows] = await Promise.all([
     dbGet<{ cnt: number }>(c.env,
       "SELECT COUNT(*) as cnt FROM chat_logs WHERE tenant_id = ? AND created_at >= ?",
       tenantId, `${todayStr}T00:00:00.000Z`
@@ -291,6 +291,10 @@ tenant.get('/stats', async (c) => {
       'SELECT COUNT(*) as cnt FROM documents WHERE tenant_id = ? AND is_deleted = 0 AND is_active = 1',
       tenantId
     ),
+    dbGet<{ cnt: number }>(c.env,
+      'SELECT COUNT(*) as cnt FROM scenarios WHERE tenant_id = ? AND is_active != -1',
+      tenantId
+    ),
     dbAll<{ id: string; created_at: string; channel: string; user_message: string; intent: string }>(c.env,
       'SELECT id, created_at, channel, user_message, intent FROM chat_logs WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 5',
       tenantId
@@ -302,6 +306,7 @@ tenant.get('/stats', async (c) => {
   const monthCount     = monthRow.data?.cnt      || 0
   const totalCount     = totalRow.data?.cnt      || 0
   const faqCount       = faqRow.data?.cnt        || 0
+  const scenarioCount  = scenarioRow.data?.cnt   || 0
   const recentLogs     = recentRows.data         || []
 
   const growthRate = yesterdayCount > 0
@@ -323,6 +328,7 @@ tenant.get('/stats', async (c) => {
       month_count:      monthCount,
       total_count:      totalCount,
       faq_count:        faqCount,
+      scenario_count:   scenarioCount,
       growth_rate_today: growthRate,
       channel_stats:    channelStats,
       intent_stats:     intentStats,

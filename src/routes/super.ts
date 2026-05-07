@@ -375,14 +375,14 @@ superRouter.put('/plans/:id', async (c) => {
   try {
     const planId = c.req.param('id')
     const body   = await c.req.json() as any
-    const { price, faq_limit, chat_limit } = body
+    const { price, faq_limit, chat_limit, max_chatbots, response_limit } = body
 
     const { data: plan } = await dbGet(c.env, 'SELECT id FROM plans WHERE id=?', planId)
     if (!plan) return c.json({ success: false, error: '플랜을 찾을 수 없습니다.' }, 404)
 
     await dbRun(c.env,
-      'UPDATE plans SET price=?,faq_limit=?,chat_limit=?,updated_at=? WHERE id=?',
-      price, faq_limit, chat_limit, nowISO(), planId)
+      'UPDATE plans SET price=?,faq_limit=?,chat_limit=?,max_chatbots=?,response_limit=?,updated_at=? WHERE id=?',
+      price, faq_limit, chat_limit, max_chatbots, response_limit, nowISO(), planId)
 
     invalidatePlansCache()  // 🔥 캐시 무효화 - 고객사 즉시 반영
 

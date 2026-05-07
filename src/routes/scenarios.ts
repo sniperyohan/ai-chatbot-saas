@@ -7,17 +7,22 @@ const router = new Hono<{ Bindings: Bindings }>()
 router.use('*', adminAuthMiddleware)
 
 // ─────────────────────────────────────────────
-// 요금제별 시나리오 한도
+// 요금제별 한도 — DB plans 테이블에서 동적 로딩
+//   max_chatbots  → 시나리오 한도 (-1 = 무제한)
+//   response_limit → 응답 템플릿 한도 (-1 = 무제한)
 // ─────────────────────────────────────────────
-const PLAN_LIMITS: Record<string, { scenarios: number; responses: number }> = {
-  basic:  { scenarios: 10,           responses: 1 },           // 단일 응답
-  pro:    { scenarios: 30,          responses: 5 },           // 랜덤 응답 최대 5개
-  master: { scenarios: Number.MAX_SAFE_INTEGER, responses: Number.MAX_SAFE_INTEGER }, // 무제한
-}
-
-function getPlanLimit(plan?: string) {
+async function getPlanLimit(env: any, plan?: string) {
   const p = (plan || 'basic').toLowerCase()
-  return PLAN_LIMITS[p] || PLAN_LIMITS.basic
+  const { data } = await dbGet<{ max_chatbots: number; response_limit: number }>(env,
+    'SELECT max_chatbots, response_limit FROM plans WHERE name = ?', p)
+
+  const maxChatbots = data?.max_chatbots ?? 10
+  const respLimit = data?.response_limit ?? 1
+
+  return {
+    scenarios: maxChatbots === -1 ? Number.MAX_SAFE_INTEGER : maxChatbots,
+    responses: respLimit === -1 ? Number.MAX_SAFE_INTEGER : respLimit,
+  }
 }
 
 // 응답 템플릿을 JSON 배열로 정규화
@@ -65,7 +70,7 @@ router.get('/', async (c) => {
   })
 
   // 현재 요금제 제한 정보도 함께 반환 (프론트에서 활용)
-  const limit = getPlanLimit(tenant.plan)
+  const limit = await getPlanLimit(c.env, tenant.plan)
 
   return c.json({
     success: true,
@@ -100,7 +105,7 @@ router.post('/', async (c) => {
   if (!resolvedType) return c.json({ success: false, error: '타입은 필수입니다.' }, 400)
 
   // 요금제 한도 체크
-  const limit = getPlanLimit(tenant.plan)
+  const limit = await getPlanLimit(c.env, tenant.plan)
   const { data: existingList } = await dbAll(c.env,
     `SELECT id FROM scenarios WHERE tenant_id = ? AND is_active != -1`,
     tenant.id
@@ -169,7 +174,7 @@ router.put('/:id', async (c) => {
   if (!existing) return c.json({ success: false, error: '시나리오를 찾을 수 없습니다.' }, 404)
 
   // 응답 정규화 + 한도 체크
-  const limit = getPlanLimit(tenant.plan)
+  const limit = await getPlanLimit(c.env, tenant.plan)
   let respArray = normalizeResponses(responses ?? response_template)
   if (respArray.length > limit.responses) {
     respArray = respArray.slice(0, limit.responses)
