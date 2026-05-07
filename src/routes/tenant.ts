@@ -14,14 +14,13 @@ import { Hono } from 'hono'
 import { dbGet, dbAll, dbRun, generateId, nowISO } from '../lib/db'
 import { adminAuthMiddleware } from '../middleware/auth'
 import { Bindings, Variables } from '../types'
+import { getPlanByName, getAllPlans } from '../lib/plans'
+
+
 
 const tenant = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 tenant.use('*', adminAuthMiddleware)
 
-// 플랜별 가격
-const PLAN_PRICE: Record<string, number> = { basic: 99000, pro: 199000, master: 399000 }
-// 플랜별 FAQ 한도
-const PLAN_LIMIT: Record<string, number> = { basic: 50, pro: 200, master: -1 }
 
 // ─────────────────────────────────────────
 // billing_day 기반 구독 계산 헬퍼
@@ -101,7 +100,8 @@ tenant.get('/me', async (c) => {
   const faqCount = faqRow?.cnt || 0
 
   const billingInfo = calcBillingInfo(t.billing_day || 1, t.subscribed_at)
-  const limit  = PLAN_LIMIT[t.plan] || 50
+  const planInfo = await getPlanByName(c.env, t.plan)
+  const limit  = planInfo.faq_limit ?? 50
   const faqPct = limit === -1 ? 0 : Math.round((faqCount / limit) * 100)
 
   let langs: string[] = ['ko']
@@ -123,7 +123,7 @@ tenant.get('/me', async (c) => {
       faq_count:        faqCount,
       faq_limit:        limit,
       faq_pct:          faqPct,
-      monthly_amount:   PLAN_PRICE[t.plan] || 99000,
+      monthly_amount:   planInfo.price || 99000,
       ...billingInfo,
     },
   })
@@ -381,7 +381,8 @@ tenant.get('/subscription', async (c) => {
         const exp = new Date(expStr); exp.setHours(0,0,0,0);
         return Math.floor((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       })(),
-      monthly_price: PLAN_PRICE[t.plan] || 99000,
+      monthly_price: (await getPlanByName(c.env, t.plan)).price || 99000,
+
       ...billingInfo,
       payment_settings: paySettings || {
         bank_name: '국민은행', account_number: '123-456-789012',
@@ -435,7 +436,9 @@ tenant.post('/faq/excel', async (c) => {
     'SELECT plan FROM tenants WHERE id = ? LIMIT 1', tenantId
   )
   const planName = tenantRow?.plan || 'basic'
-  const faqLimit = PLAN_LIMIT[planName] ?? 50
+  const planInfo438 = await getPlanByName(c.env, planName)
+  const faqLimit = planInfo438.faq_limit ?? 50
+
 
   if (faqLimit !== -1) {
     const { data: cntRow } = await dbGet<{ cnt: number }>(c.env,
@@ -572,5 +575,18 @@ tenant.get('/analytics/top10', async (c) => {
     },
   })
 })
+
+
+// ─── 플랜 목록 조회 (고객용) ───────────────────────
+// GET /api/admin/plans
+tenant.get('/plans', async (c) => {
+  try {
+    const plans = await getAllPlans(c.env)
+    return c.json({ success: true, data: plans })
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500)
+  }
+})
+
 
 export default tenant

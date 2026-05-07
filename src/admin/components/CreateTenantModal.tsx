@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Loader2, CheckCircle, Copy, Check, X } from 'lucide-react'
 import { superApi } from '../lib/superApi'
 import { S } from '../lib/ui'
+import { PlanType, PLANS, getPlanSummary, getPlanDetail } from '../lib/plans'
 
 // ─── 타입 ─────────────────────────────────────────
 type Phase = 'input' | 'success'
@@ -9,7 +10,8 @@ type Phase = 'input' | 'success'
 interface FormState {
   company_name: string
   email: string
-  plan: 'basic' | 'pro' | 'master'
+  plan: PlanType
+
 }
 
 interface SuccessState {
@@ -29,11 +31,6 @@ interface Props {
 // ─── 초기값 상수 (절대 바뀌지 않음) ────────────────
 const INIT_FORM: FormState = { company_name: '', email: '', plan: 'basic' }
 
-const PLAN_LABELS: Record<string, string> = {
-  basic:  'Basic (₩99,000/월 · FAQ 50개 · 월 1,000회 답변)',
-  pro:    'Pro (₩199,000/월 · FAQ 200개 · 월 5,000회 답변)',
-  master: 'Master (₩399,000/월 · FAQ 무제한 · 월 답변 무제한)',
-}
 
 // ─── 컴포넌트 ────────────────────────────────────
 export default function CreateTenantModal({ open, onClose, onCreated }: Props) {
@@ -252,9 +249,9 @@ export default function CreateTenantModal({ open, onClose, onCreated }: Props) {
                   }}
                   disabled={loading}
                 >
-                  <option value="basic">Basic · ₩99,000/월 · FAQ 50개 · 월 1,000회 답변</option>
-                  <option value="pro">Pro · ₩199,000/월 · FAQ 200개 · 월 5,000회 답변</option>
-                  <option value="master">Master · ₩399,000/월 · FAQ 무제한 · 월 답변 무제한</option>
+                  {(Object.keys(PLANS) as PlanType[]).map(key => (
+                    <option key={key} value={key}>{getPlanSummary(key)}</option>
+                  ))}
                 </select>
                 {errors.plan && (
                   <p style={{ fontSize: '12px', color: '#EF4444', marginTop: '4px' }}>
@@ -263,9 +260,7 @@ export default function CreateTenantModal({ open, onClose, onCreated }: Props) {
                 )}
                 {/* 플랜 안내 뱃지 */}
                 <div style={{ marginTop: '8px', padding: '10px 14px', borderRadius: '8px', background: 'var(--bg-primary)', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                  {form.plan === 'basic'  && '📦 기본 플랜 — FAQ 최대 50개, 월 1,000회 답변'}
-                  {form.plan === 'pro'    && '🚀 주문조회 포함 — FAQ 최대 200개, 월 5,000회 답변'}
-                  {form.plan === 'master' && '⭐ 모든 기능 무제한 — FAQ 무제한, 월 답변 무제한'}
+                  {getPlanDetail(form.plan)}
                 </div>
               </div>
 

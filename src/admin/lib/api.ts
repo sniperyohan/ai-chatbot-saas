@@ -110,4 +110,7 @@ export const api = {
   // TOP10 분석 (NEW)
   getTop10: (period: string = 'month') =>
     request<any>('GET', `/admin/analytics/top10?period=${period}`),
+  
+  // 플랜 목록 조회 (NEW - DB 동적 조회)
+  getPlans: () => request<any>('GET', '/admin/plans'),
 }

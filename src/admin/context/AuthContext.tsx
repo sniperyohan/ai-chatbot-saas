@@ -1,4 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { api } from '../lib/api'
+import { loadPlansFromDB } from '../lib/plans'
+
 
 export interface TenantInfo {
   id: string
@@ -42,12 +45,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return s ? JSON.parse(s) : null
   })
 
+   // 🔥 페이지 로드/새로고침 시 토큰이 있으면 DB 플랜 동기화
+   useEffect(() => {
+     if (token) {
+       loadPlansFromDB(api).catch(() => {})
+     }
+   }, [])
+
   const login = (t: string, info: TenantInfo) => {
     setToken(t)
     setTenant(info)
     localStorage.setItem('admin_token', t)
     localStorage.setItem('admin_tenant', JSON.stringify(info))
-  }
+
+    loadPlansFromDB(api).catch(() => {})
+
+   }
 
   const logout = () => {
     setToken(null)

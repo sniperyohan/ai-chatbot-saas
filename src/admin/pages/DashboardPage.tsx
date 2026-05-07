@@ -9,12 +9,12 @@ import { useAuth } from '../context/AuthContext'
 import { SkeletonStats, SkeletonCard } from '../components/Skeleton'
 import Badge from '../components/Badge'
 import { S } from '../lib/ui'
+import { getPlan, isMasterPlan } from '../lib/plans'
+
 
 const COLORS = ['#4F46E5','#10B981','#F59E0B','#EF4444','#8B5CF6','#06B6D4']
 const CH_LABELS: Record<string,string> = { web:'웹', kakao:'카카오', naver:'네이버', messenger:'메신저' }
 const IT_LABELS: Record<string,string> = { FAQ_INQUIRY:'FAQ', ORDER_INQUIRY:'주문', GREETING:'인사', RESERVATION:'예약', PAYMENT:'결제', COMPLAINT:'불만', OTHER:'기타' }
-const PLAN_PRICE: Record<string,number> = { basic: 99000, pro: 199000, master: 399000 }
-const PLAN_LIMIT: Record<string,number> = { basic: 50, pro: 200, master: -1 }
 
 // ─────────────────────────────────────────
 // 툴팁 컴포넌트
@@ -194,7 +194,8 @@ function SubscriptionCard({ tenantPlan }: { tenantPlan: string }) {
   const billingDay = sub?.billing_day
   const status = sub?.subscription_status || 'active'
   const isPaymentPending = status === 'pending' || !!sub?.payment_requested_at
-  const isMaster = plan === 'master'
+  const isMaster = isMasterPlan(plan)
+
 
   // 배너 결정
   let banner: { bg: string; color: string; border: string; text: string } | null = null
@@ -254,7 +255,8 @@ function SubscriptionCard({ tenantPlan }: { tenantPlan: string }) {
               </div>
               <div style={{ padding: '12px', background: 'var(--bg-primary)', borderRadius: '10px' }}>
                 <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>월 요금</div>
-                <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>₩{(PLAN_PRICE[plan] || 99000).toLocaleString()}</div>
+                <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>₩{getPlan(plan).price.toLocaleString()
+}</div>
               </div>
             </>
           )}
@@ -317,7 +319,8 @@ function SubscriptionCard({ tenantPlan }: { tenantPlan: string }) {
     borderRadius: '8px',
   }}>
     <div style={{ fontSize: '12px', fontWeight: 600, color: '#4F46E5', marginBottom: '6px' }}>
-      입금 금액: ₩{(PLAN_PRICE[plan] || 99000).toLocaleString()}
+      입금 금액: ₩{getPlan(plan).price.toLocaleString()
+}
     </div>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
       <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
@@ -406,7 +409,7 @@ export default function DashboardPage() {
   const channelData = stats ? Object.entries(stats.channel_stats || {}).map(([k, v]: any) => ({ name: CH_LABELS[k] || k, value: v })) : []
   const intentData  = stats ? Object.entries(stats.intent_stats || {}).map(([k, v]: any) => ({ name: IT_LABELS[k] || k, value: v })) : []
 
-  const limit = PLAN_LIMIT[tenant?.plan || 'basic'] || 50
+  const limit = getPlan(tenant?.plan).faqLimit
   const faqCount = stats?.faq_count || tenant?.faq_count || 0
   const faqPct = limit === -1 ? 0 : Math.round((faqCount / limit) * 100)
 
@@ -418,7 +421,9 @@ export default function DashboardPage() {
       <SubscriptionCard tenantPlan={tenant?.plan || 'basic'} />
 
       {/* 사용량 프로그레스 바 */}
-      {!loading && tenant?.plan !== 'master' && (
+      {!loading && !isMasterPlan(tenant?.plan)
+
+ && (
         <div style={{ ...S.card }}>
           <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '16px' }}>📊 사용량 현황</h3>
           <UsageBar label="FAQ 등록" current={faqCount} limit={limit} color="#4F46E5"/>
@@ -461,7 +466,9 @@ export default function DashboardPage() {
       )}
 
       {/* FAQ 한도 경고 */}
-      {!loading && faqPct >= 100 && tenant?.plan !== 'master' && (
+      {!loading && faqPct >= 100 && !isMasterPlan(tenant?.plan)
+
+ && (
         <div style={{ borderRadius: '12px', background: '#FEF2F2', border: '1px solid #FECACA', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
           <p style={{ fontSize: '13px', color: '#991B1B', fontWeight: 600 }}>🚫 FAQ 한도에 도달했습니다. 플랜을 업그레이드해주세요.</p>
           <button style={{ background: '#DC2626', color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 14px', fontSize: '12px', cursor: 'pointer', minHeight: '36px', fontFamily: 'inherit' }}>업그레이드</button>

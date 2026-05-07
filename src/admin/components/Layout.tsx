@@ -11,6 +11,8 @@ import { useToast } from '../hooks/useToast'
 import ToastContainer from './Toast'
 import ChangePasswordModal from './ChangePasswordModal'
 import { api } from '../lib/api'
+import { getPlan, isMasterPlan } from '../lib/plans'
+
 
 const tabs = [
   { key: 'dashboard',  label: '대시보드',   icon: LayoutDashboard, path: '/admin/dashboard',  title: '대시보드' },
@@ -22,7 +24,6 @@ const tabs = [
   { key: 'install',    label: '위젯 가이드', icon: Code2,            path: '/admin/install',     title: '위젯 설치 가이드' },
 ]
 
-const PLAN_LIMIT: Record<string, number> = { basic: 50, pro: 200, master: -1 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
@@ -63,19 +64,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const handleLogout = () => { logout(); navigate('/admin/login') }
 
   // 플랜 한도 경고 배너 계산 (master 제외)
-  const isMaster = tenant?.plan === 'master'
+  const planInfo = getPlan(tenant?.plan)
+  const isMaster = isMasterPlan(tenant?.plan)
   const faqPct = tenant?.faq_pct || 0
   const faqCount = tenant?.faq_count || 0
-  const faqLimit = tenant?.faq_limit || PLAN_LIMIT[tenant?.plan || 'basic'] || 50
+  const faqLimit = tenant?.faq_limit || planInfo.faqLimit
   const showWarning80 = !isMaster && faqPct >= 80 && faqPct < 100
   const showWarning100 = !isMaster && faqPct >= 100
 
   // 결제일 임박 경고 (D-7 이내)
   const daysUntil = tenant?.dday ?? tenant?.days_until_billing
   const showBillingWarning = !isMaster && daysUntil !== undefined && daysUntil <= 7
-
-  const planLabel: Record<string, string> = { basic: 'Basic', pro: 'Pro', master: 'Master' }
-  const planColor: Record<string, string> = { basic: '#3B82F6', pro: '#8B5CF6', master: '#F59E0B' }
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)' }}>
@@ -98,8 +97,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   {tenant?.company_name || 'AI 상담봇'}
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                  <span style={{ fontWeight: 600, color: planColor[tenant?.plan || 'basic'] }}>
-                    {planLabel[tenant?.plan || 'basic']}
+                  <span style={{ fontWeight: 600, color: planInfo.color }}>
+                    {planInfo.label}
                   </span>
                   {' '}플랜
                 </div>
@@ -190,8 +189,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 700, background: `${planColor[tenant?.plan || 'basic']}20`, color: planColor[tenant?.plan || 'basic'] }}>
-                          {planLabel[tenant?.plan || 'basic']} 플랜
+                        <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 700, background: `${planInfo.color}20`, color: planInfo.color }}>
+                          {planInfo.label} 플랜
                         </span>
                         {tenant?.days_until_billing !== undefined && !isMaster && (
                           <span style={{ fontSize: '11px', color: (daysUntil || 0) <= 3 ? '#DC2626' : 'var(--text-secondary)' }}>

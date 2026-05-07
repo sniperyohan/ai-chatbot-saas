@@ -14,9 +14,10 @@ import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
 import { SkeletonTable } from '../components/Skeleton'
 import { S } from '../lib/ui'
+import { getPlan } from '../lib/plans'
 
 const DEFAULT_CATEGORIES = ['일반', '배송', '결제', '교환반품', '기타']
-const PLAN_LIMIT: Record<string, number> = { basic: 50, pro: 200, master: -1 }
+
 
 // ─── 툴팁 컴포넌트 ───────────────────────────────────
 function Tooltip({ text }: { text: string }) {
@@ -298,7 +299,10 @@ export default function FAQPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
 
-  const limit = PLAN_LIMIT[tenant?.plan || 'basic'] || 50
+  const limit = getPlan(tenant?.plan).faqLimit
+
+
+
   const pct = limit === -1 ? 0 : Math.round((total / limit) * 100)
   const barColor = pct >= 100 ? '#EF4444' : pct >= 80 ? '#F59E0B' : '#4F46E5'
 

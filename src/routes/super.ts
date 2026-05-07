@@ -7,6 +7,8 @@ import { dbGet, dbAll, dbRun, dbBatch, dbPaginate, generateId, nowISO } from '..
 
 import { superAuthMiddleware } from '../middleware/auth'
 import { Bindings, Variables } from '../types'
+import { invalidatePlansCache } from '../lib/plans'
+
 
 const superRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
@@ -381,6 +383,9 @@ superRouter.put('/plans/:id', async (c) => {
     await dbRun(c.env,
       'UPDATE plans SET price=?,faq_limit=?,chat_limit=?,updated_at=? WHERE id=?',
       price, faq_limit, chat_limit, nowISO(), planId)
+
+    invalidatePlansCache()  // 🔥 캐시 무효화 - 고객사 즉시 반영
+
 
     const { data: updated } = await dbGet(c.env, 'SELECT * FROM plans WHERE id=?', planId)
     return c.json({ success: true, message: '플랜이 수정되었습니다.', data: updated })
