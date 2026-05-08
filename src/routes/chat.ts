@@ -205,13 +205,26 @@ chat.post('/kakao/chat', async (c) => {
 
   try {
     const result = await handleChat(c.env, tenantId, userMessage, 'kakao', sessionId)
-    return c.json(kakaoResponse(result.answer))
+    return c.json(kakaoResponse(result.answer, result.imageUrl))
   } catch {
     return c.json(kakaoResponse('잠시만 기다려 주세요. 😊 담당자에게 연결 중입니다.'))
   }
 })
 
-function kakaoResponse(text: string) {
+function kakaoResponse(text: string, imageUrl?: string) {
+  if (imageUrl) {
+    return {
+      version: '2.0',
+      template: {
+        outputs: [{
+          basicCard: {
+            description: text,
+            thumbnail: { imageUrl }
+          }
+        }]
+      }
+    }
+  }
   return { version: '2.0', template: { outputs: [{ simpleText: { text } }] } }
 }
 

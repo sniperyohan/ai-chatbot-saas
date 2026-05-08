@@ -27,7 +27,9 @@ export interface ProcessMessageResult {
   intent: string
   isAnswered: boolean
   responseTime: number
+  imageUrl?: string
 }
+
 
 // ─────────────────────────────────────────
 // 1. 코사인 유사도 계산
@@ -236,7 +238,7 @@ export async function processMessage(
       const sqlResult = await dbAll<{
         id: string; trigger_keywords: string; response_template: string; type: string; name: string; description: string
       }>(env,
-        `SELECT id, trigger_keywords, response_template, type, name, description FROM scenarios WHERE tenant_id = ? AND is_active = 1 AND response_template != '' ORDER BY sort_order ASC, created_at ASC`,
+        `SELECT id, trigger_keywords, response_template, type, name, description, image_url FROM scenarios WHERE tenant_id = ? AND is_active = 1 AND response_template != '' ORDER BY sort_order ASC, created_at ASC`,
         tenantId
       )
       const scenarioRows = sqlResult.data
@@ -334,7 +336,7 @@ ${optionsText}
               response_time: Date.now() - startTime
             }).catch(err => console.error('[rag] saveChatLog error:', err))
 
-            return { answer, intent: chosen.type || 'SCENARIO', isAnswered: true, responseTime: Date.now() - startTime }
+            return { answer, intent: chosen.type || 'SCENARIO', isAnswered: true, responseTime: Date.now() - startTime, imageUrl: chosen.image_url || undefined }
           }
         }
       }

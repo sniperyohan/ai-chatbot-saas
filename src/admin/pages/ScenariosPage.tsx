@@ -31,6 +31,7 @@ interface Scenario {
   trigger_keywords: string[]
   response_template: string
   responses?: string[]   //
+  image_url?: string
   is_active: boolean | number
   sort_order?: number
   _localKey: string  // React key (id || `new_${ts}`)
@@ -77,6 +78,7 @@ export default function ScenariosPage() {
           responses: Array.isArray(s.responses) && s.responses.length > 0
             ? s.responses
             : (s.response_template ? [s.response_template] : ['']),
+          image_url: s.image_url || '',
           is_active: s.is_active ?? 1,
           sort_order: s.sort_order || 0,
           _localKey: id,
@@ -165,6 +167,7 @@ export default function ScenariosPage() {
         trigger_keywords: s.trigger_keywords || [],
         response_template: s.response_template || '',
         responses: (s.responses || []).map(r => r.trim()).filter(r => r),
+        image_url: s.image_url || '',
         is_active: s.is_active,
         sort_order: s.sort_order || 0,
       }
@@ -226,6 +229,7 @@ export default function ScenariosPage() {
       trigger_keywords: [],
       response_template: '',
       responses: [''],
+      image_url: '',
       is_active: 1,
       sort_order: Object.keys(scenarios).length,
       _localKey: tempKey,
@@ -452,6 +456,33 @@ export default function ScenariosPage() {
                   </button>
                 )}
               </div>
+              {/* 🖼️ 이미지 URL (선택) - 카카오톡 basicCard */}
+              <div style={{ marginTop: '12px', padding: '12px', background: '#F9FAFB', borderRadius: '8px', border: '1px solid #E5E7EB' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: '#374151' }}>
+                  🖼️ 이미지 URL <span style={{ color: '#9CA3AF', fontWeight: 400, fontSize: '11px' }}>(선택 · 카카오톡 이미지 카드)</span>
+                </label>
+                <input
+                  type="url"
+                  value={s.image_url || ''}
+                  onChange={e => update(key, 'image_url', e.target.value)}
+                  placeholder="https://example.com/image.jpg"
+                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}
+                />
+                {s.image_url && (
+                  <div style={{ marginTop: '8px' }}>
+                    <img
+                      src={s.image_url}
+                      alt="미리보기"
+                      style={{ maxWidth: '200px', maxHeight: '120px', borderRadius: '6px', border: '1px solid #E5E7EB', display: 'block' }}
+                      onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0.3' }}
+                    />
+                    <p style={{ fontSize: '11px', color: '#6B7280', marginTop: '4px', margin: '4px 0 0 0' }}>
+                      💡 답변과 함께 이미지 카드로 전송됩니다
+                    </p>
+                  </div>
+                )}
+              </div>
+
 
               {/* Buttons: Save + Delete */}
               <div style={{ display: 'flex', gap: '8px' }}>

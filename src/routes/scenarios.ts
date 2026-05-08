@@ -95,10 +95,11 @@ router.post('/', async (c) => {
     name, type, scenario_type,
     trigger_keywords,
     response_template, responses,
-    icon, description, color, sort_order,
+    icon, description, color, sort_order, image_url,
     is_active,
   } = body
   console.log('[POST scenario] body:', JSON.stringify(body))
+
   console.log('[POST scenario] description:', description, '| typeof:', typeof description)
 
   const resolvedType = type || scenario_type
@@ -137,11 +138,11 @@ router.post('/', async (c) => {
   await dbRun(c.env,
     `INSERT INTO scenarios
      (id, tenant_id, name, type, trigger_keywords, response_template,
-      icon, description, color, sort_order,
+      icon, description, color, sort_order, image_url,
       is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id, tenant.id, scenarioName, resolvedType, keywordsJson, responsesJson,
-    finalIcon, finalDesc, finalColor, finalSort,
+    finalIcon, finalDesc, finalColor, finalSort, image_url || '',
     active, now, now
   )
 
@@ -159,7 +160,7 @@ router.put('/:id', async (c) => {
     name, type, scenario_type,
     trigger_keywords,
     response_template, responses,
-    icon, description, color, sort_order,
+    icon, description, color, sort_order, image_url,
     is_active,
   } = body
   console.log('[PUT scenario] body:', JSON.stringify(body))
@@ -193,11 +194,11 @@ router.put('/:id', async (c) => {
   await dbRun(c.env,
     `UPDATE scenarios SET
        name=?, type=?, trigger_keywords=?, response_template=?,
-       icon=?, description=?, color=?, sort_order=?,
+       icon=?, description=?, color=?, sort_order=?, image_url=?,
        is_active=?, updated_at=?
      WHERE id=? AND tenant_id=?`,
     scenarioName, putType, keywordsJson, responsesJson,
-    finalIcon, finalDesc, finalColor, finalSort,
+    finalIcon, finalDesc, finalColor, finalSort, image_url || '',
     active, now, id, tenant.id
   )
 
