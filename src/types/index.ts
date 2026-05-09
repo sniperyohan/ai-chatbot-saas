@@ -78,6 +78,7 @@ export interface Document {
   language: string
   is_ai_refined: boolean
   is_deleted: boolean
+  image_url?: string
   created_at: string
 }
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
-  Upload, Download, Save, Trash2, Pencil, X, Check, Loader2,
+  Upload, Download, Save, Trash2, Pencil, X, Check, Loader2, ImageIcon,
   AlertTriangle, BookOpen, Search, ToggleLeft, ToggleRight,
   Sparkles, Info, FileSpreadsheet, Eye, Tag, Plus, GripVertical
 } from 'lucide-react'
@@ -277,6 +277,10 @@ export default function FAQPage() {
   const [refined, setRefined] = useState<{ question: string; answer: string } | null>(null)
   const [editRefined, setEditRefined] = useState<{ question: string; answer: string } | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
+    // ── 이미지 업로드 ──
+  const [expandedImageRow, setExpandedImageRow] = useState<string | null>(null)
+  const [uploadingImageRow, setUploadingImageRow] = useState<string | null>(null)
+  const [savingImageRow, setSavingImageRow] = useState<string | null>(null)
 
   // ── 엑셀 업로드 ──
   const [excelRows, setExcelRows] = useState<ExcelRow[]>([])
@@ -524,6 +528,116 @@ export default function FAQPage() {
     }
   }
 
+    // ── 이미지 자동 리사이즈 ──
+  const resizeImage = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const MAX_WIDTH = 1040
+      const MAX_HEIGHT = 520
+      const QUALITY = 0.85
+
+      if (file.type === 'image/gif') {
+        resolve(file)
+        return
+      }
+
+      const img = new window.Image()
+      const reader = new FileReader()
+
+      reader.onload = (e) => {
+        img.src = e.target?.result as string
+      }
+      reader.onerror = () => reject(new Error('파일 읽기 실패'))
+
+      img.onload = () => {
+        let { width, height } = img
+
+        if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+          const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height)
+          width = Math.round(width * ratio)
+          height = Math.round(height * ratio)
+        }
+
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          reject(new Error('Canvas 컨텍스트 생성 실패'))
+          return
+        }
+
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        ctx.drawImage(img, 0, 0, width, height)
+
+        const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob)
+            else reject(new Error('이미지 변환 실패'))
+          },
+          outputType,
+          QUALITY
+        )
+      }
+      img.onerror = () => reject(new Error('이미지 로드 실패'))
+
+      reader.readAsDataURL(file)
+    })
+  }
+
+  // ── FAQ 이미지 업로드 ──
+  const handleFaqImageUpload = async (docId: string, file: File) => {
+    if (file.size > 50 * 1024 * 1024) {
+      alert('파일 크기는 50MB 이하여야 합니다.')
+      return
+    }
+    if (!file.type.startsWith('image/')) {
+      alert('이미지 파일만 업로드 가능합니다.')
+      return
+    }
+
+    setUploadingImageRow(docId)
+    try {
+      const resizedBlob = await resizeImage(file)
+      console.log(`[FAQ 이미지 리사이즈] ${(file.size / 1024).toFixed(1)}KB → ${(resizedBlob.size / 1024).toFixed(1)}KB`)
+
+      const ext = file.type === 'image/gif' ? 'gif' : file.type === 'image/png' ? 'png' : 'jpg'
+      const resizedFile = new File([resizedBlob], `image.${ext}`, { type: resizedBlob.type })
+
+      const res = await api.uploadImage(resizedFile)
+      if (res.success && res.data?.url) {
+        // DB에 image_url 저장
+        setSavingImageRow(docId)
+        await api.updateDocument(docId, { image_url: res.data.url })
+        // 로컬 상태 업데이트
+        setDocs((prev: any[]) => prev.map(d => d.id === docId ? { ...d, image_url: res.data!.url } : d))
+      } else {
+        alert(res.error || '업로드 실패')
+      }
+    } catch (e: any) {
+      alert('업로드 실패: ' + (e?.message || '알 수 없는 오류'))
+    } finally {
+      setUploadingImageRow(null)
+      setSavingImageRow(null)
+    }
+  }
+
+  // ── FAQ 이미지 제거 ──
+  const handleFaqImageRemove = async (docId: string) => {
+    if (!confirm('이미지를 제거하시겠습니까?')) return
+    setSavingImageRow(docId)
+    try {
+      await api.updateDocument(docId, { image_url: null })
+      setDocs((prev: any[]) => prev.map(d => d.id === docId ? { ...d, image_url: null } : d))
+    } catch (e: any) {
+      alert('제거 실패: ' + (e?.message || '알 수 없는 오류'))
+    } finally {
+      setSavingImageRow(null)
+    }
+  }
+
+
   const handleToggle = async (doc: any) => {
     setTogglingId(doc.id)
     try {
@@ -745,7 +859,7 @@ export default function FAQPage() {
                 {[
                   { col: 'A열 (필수)', desc: '질문', color: '#4F46E5' },
                   { col: 'B열 (필수)', desc: '답변', color: '#4F46E5' },
-                  { col: 'C열 (선택)', desc: '카테고리 (없으면 "일반" 자동 설정)', color: '#6B7280' },
+                  { col: 'C열 (선택)', desc: '카테고리 (없으면 "일반" 자동 설정)', color: '#059669' },
                 ].map(item => (
                   <div key={item.col} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontSize: '12px', fontWeight: 700, color: item.color, background: `${item.color}15`, padding: '2px 8px', borderRadius: '4px' }}>{item.col}</span>
@@ -988,6 +1102,7 @@ export default function FAQPage() {
                     </thead>
                     <tbody>
                       {docs.map((doc: any) => (
+                        <React.Fragment key={doc.id}>
                         <tr key={doc.id} style={{ borderBottom: '1px solid var(--border)', opacity: doc.is_active === false ? 0.5 : 1 }}
                           onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'var(--bg-primary)'}
                           onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = ''}>
@@ -1031,6 +1146,8 @@ export default function FAQPage() {
                               <td style={{ padding: '12px 12px 12px 0', fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{doc.created_at?.slice(0, 10)}</td>
                               <td style={{ padding: '12px 0' }}>
                                 <div style={{ display: 'flex', gap: '4px' }}>
+                                  <button onClick={() => setExpandedImageRow(expandedImageRow === doc.id ? null : doc.id)} style={{ padding: '6px', borderRadius: '6px', background: 'none', border: 'none', cursor: 'pointer', color: doc.image_url ? '#059669' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', minWidth: '36px', minHeight: '36px', justifyContent: 'center' }} title={doc.image_url ? '이미지 있음 (클릭하여 편집)' : '이미지 추가'}><ImageIcon size={14} /></button>
+
                                   <button onClick={() => startEdit(doc)} style={{ padding: '6px', borderRadius: '6px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', minWidth: '36px', minHeight: '36px', justifyContent: 'center' }}><Pencil size={14} /></button>
                                   <button onClick={() => setDeleteConfirm(doc.id)} style={{ padding: '6px', borderRadius: '6px', background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', display: 'flex', alignItems: 'center', minWidth: '36px', minHeight: '36px', justifyContent: 'center' }}><Trash2 size={14} /></button>
                                 </div>
@@ -1038,6 +1155,82 @@ export default function FAQPage() {
                             </>
                           )}
                         </tr>
+                                                  {expandedImageRow === doc.id && (
+                            <tr style={{ background: 'var(--bg-primary)' }}>
+                              <td colSpan={6} style={{ padding: '16px 20px' }}>
+                                <div style={{ background: 'white', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                    <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                                      🖼️ 이미지 <span style={{ color: 'var(--text-secondary)', fontWeight: 400, fontSize: '11px' }}>(선택 · 카카오톡 이미지 카드 · 권장 2:1)</span>
+                                    </label>
+                                    <button onClick={() => setExpandedImageRow(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}>
+                                      <X size={16} />
+                                    </button>
+                                  </div>
+
+                                  {!doc.image_url ? (
+                                    <div
+                                      onDragOver={e => { e.preventDefault(); (e.currentTarget as HTMLDivElement).style.background = '#EEF2FF' }}
+                                      onDragLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}
+                                      onDrop={async (e) => {
+                                        e.preventDefault()
+                                        ;(e.currentTarget as HTMLDivElement).style.background = 'white'
+                                        const f = e.dataTransfer.files?.[0]
+                                        if (f) await handleFaqImageUpload(doc.id, f)
+                                      }}
+                                      style={{ border: '2px dashed #D1D5DB', borderRadius: '8px', padding: '20px', textAlign: 'center', background: 'white', cursor: 'pointer', transition: 'background 0.2s' }}
+                                      onClick={() => document.getElementById(`faq-file-input-${doc.id}`)?.click()}
+                                    >
+                                      <input
+                                        id={`faq-file-input-${doc.id}`}
+                                        type="file"
+                                        accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
+                                        style={{ display: 'none' }}
+                                        onChange={async (e) => {
+                                          const f = e.target.files?.[0]
+                                          if (f) await handleFaqImageUpload(doc.id, f)
+                                          e.target.value = ''
+                                        }}
+                                      />
+                                      {uploadingImageRow === doc.id ? (
+                                        <div style={{ color: '#059669', fontSize: '13px' }}>
+                                          <Loader2 size={20} style={{ animation: 'spin 1s linear infinite', marginBottom: '4px' }} />
+                                          <p style={{ margin: 0 }}>업로드 중...</p>
+                                        </div>
+                                      ) : (
+                                        <div style={{ color: '#059669', fontSize: '13px' }}>
+                                          <p style={{ margin: '0 0 4px 0', fontWeight: 600 }}>📁 클릭 또는 드래그하여 업로드</p>
+                                          <p style={{ margin: 0, fontSize: '11px' }}>JPG, PNG, WEBP, GIF · 최대 50MB (자동 최적화)</p>
+                                          <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#059669', fontWeight: 600 }}>💡 권장 비율 2:1 (예: 1040×520)</p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <div style={{ position: 'relative', display: 'inline-block' }}>
+                                        <img
+                                          src={doc.image_url}
+                                          alt="미리보기"
+                                          style={{ maxWidth: '300px', maxHeight: '150px', borderRadius: '6px', border: '1px solid var(--border)', display: 'block' }}
+                                          onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0.3' }}
+                                        />
+                                        <button
+                                          onClick={() => handleFaqImageRemove(doc.id)}
+                                          disabled={savingImageRow === doc.id}
+                                          style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(220, 38, 38, 0.9)', color: 'white', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                          title="이미지 제거"
+                                        >
+                                          {savingImageRow === doc.id ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <X size={12} />}
+                                        </button>
+                                      </div>
+                                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px' }}>💡 답변과 함께 이미지 카드로 전송됩니다</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                         </React.Fragment>
                       ))}
                     </tbody>
                   </table>

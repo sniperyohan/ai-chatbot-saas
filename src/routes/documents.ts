@@ -164,6 +164,7 @@ documents.post('/', async (c) => {
   let body: {
     question?: string; answer?: string; category?: string
     original_question?: string; original_answer?: string
+    image_url?: string
     refined_question?: string; refined_answer?: string
     is_ai_refined?: boolean
   }
@@ -206,8 +207,8 @@ documents.post('/', async (c) => {
     `INSERT INTO documents
       (id, tenant_id, question, answer, original_question, original_answer,
        refined_question, refined_answer, content, category, language,
-       is_active, is_deleted, is_ai_refined, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,1,0,?,?,?)`,
+       is_active, is_deleted, is_ai_refined, image_url, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,1,0,?,?,?,?)`,
     docId, tenantId,
     question.trim(), answer.trim(),
     body.original_question || question.trim(),
@@ -217,6 +218,7 @@ documents.post('/', async (c) => {
     `${question.trim()}\n${answer.trim()}`,
     category, 'ko',
     body.is_ai_refined ? 1 : 0,
+    body.image_url || null,
     now, now
   )
 
@@ -254,6 +256,7 @@ documents.post('/', async (c) => {
 documents.post('/embed', async (c) => {
   let body: {
     original_question?: string; original_answer?: string
+    image_url?: string
     refined_question?: string; refined_answer?: string
     category?: string; language?: string; is_ai_refined?: boolean
   }
@@ -285,8 +288,8 @@ documents.post('/embed', async (c) => {
     `INSERT INTO documents
       (id, tenant_id, question, answer, original_question, original_answer,
        refined_question, refined_answer, content, category, language,
-       is_active, is_deleted, is_ai_refined, embedding, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,1,0,?,?,?,?)`,
+       is_active, is_deleted, is_ai_refined, embedding, image_url, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,1,0,?,?,?,?,?)`,
     docId, tenantId,
     question, answer,
     body.original_question || null, body.original_answer || null,
@@ -294,7 +297,9 @@ documents.post('/embed', async (c) => {
     `${question}\n${answer}`,
     catResult.name, body.language || 'ko',
     body.is_ai_refined ? 1 : 0,
-    JSON.stringify(embedding), now, now
+    JSON.stringify(embedding),
+    body.image_url || null,
+    now, now
   )
 
   if (error) return c.json({ success: false, error: `문서 저장 실패: ${error}` }, 500)
@@ -391,6 +396,11 @@ documents.put('/:id', async (c) => {
     fields.push('category = ?')
     values.push(putCatResult.name)
   }
+    if (body.image_url !== undefined) {
+    fields.push('image_url = ?')
+    values.push(body.image_url || null)
+  }
+
 
   if (!fields.length) return c.json({ success: true, message: '변경 없음' })
 

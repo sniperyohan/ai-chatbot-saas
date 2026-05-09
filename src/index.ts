@@ -106,9 +106,9 @@ const ADMIN_HTML = `<!DOCTYPE html>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <script type="module" crossorigin src="/admin/assets/index-SjUFI195-v2.js"></script>
+  <script type="module" crossorigin src="/admin/assets/index-UCe3GUSG-v2.js"></script>
   <link rel="modulepreload" crossorigin href="/admin/assets/react-vendor-C3uA-UMJ-v2.js">
-  <link rel="modulepreload" crossorigin href="/admin/assets/lucide-vendor-TBwDZnQq-v2.js">
+  <link rel="modulepreload" crossorigin href="/admin/assets/lucide-vendor-DB4mdYJ--v2.js">
   <link rel="modulepreload" crossorigin href="/admin/assets/recharts-vendor-Dhxszn48-v2.js">
   <link rel="stylesheet" crossorigin href="/admin/assets/index-MX6WQWWt.css">
 </head>

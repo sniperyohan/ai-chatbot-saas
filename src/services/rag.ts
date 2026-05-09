@@ -58,9 +58,9 @@ export async function searchSimilarDocuments(
   try {
     // 임베딩이 있는 활성 FAQ 전체 조회
     const { data: docs } = await dbAll<{
-      id: string; question: string; answer: string; category: string; embedding: string
+      id: string; question: string; answer: string; category: string; embedding: string; image_url: string | null
     }>(env,
-      `SELECT id, question, answer, category, embedding
+      `SELECT id, question, answer, category, embedding, image_url
        FROM documents
        WHERE tenant_id = ? AND is_active = 1 AND is_deleted = 0 AND embedding IS NOT NULL
        LIMIT 500`,
@@ -384,9 +384,9 @@ ${optionsText}
       try {
         // 임계값 없이 유사도 상위 3개 가져오기
         const { data: allDocs } = await dbAll<{
-          id: string; question: string; answer: string; category: string; embedding: string
+          id: string; question: string; answer: string; category: string; embedding: string; image_url: string | null
         }>(env,
-          `SELECT id, question, answer, category, embedding
+          `SELECT id, question, answer, category, embedding, image_url
            FROM documents
            WHERE tenant_id = ? AND is_active = 1 AND is_deleted = 0 AND embedding IS NOT NULL
            LIMIT 500`,
@@ -430,7 +430,7 @@ ${optionsText}
         is_answered: true,
         response_time: Date.now() - startTime
       }).catch(err => console.error('[rag] saveChatLog error:', err))
-      return { answer, intent: 'FAQ_DIRECT', isAnswered: true, responseTime: Date.now() - startTime }
+      return { answer, intent: 'FAQ_DIRECT', isAnswered: true, responseTime: Date.now() - startTime, imageUrl: finalDocs[0].image_url || undefined }
     }
 
         // ── Step 6: 최종 답변 생성 (4초 타임아웃) ─────────
