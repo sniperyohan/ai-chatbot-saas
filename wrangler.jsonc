@@ -1,33 +1,39 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "ai-chatbot-saas",
-  "main": "./dist/index.js",
-  "compatibility_date": "2026-03-29",
-  "compatibility_flags": ["nodejs_compat"],
-
-  // Workers Static Assets
-  "assets": {
-    "directory": "./dist/public",
-    "binding": "ASSETS"
-  },
-
-  // ─── Cloudflare D1 Database ───────────────────────────────
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "ai-chatbot-saas-db",
-      "database_id": "cf3f5086-ff3b-4fcc-a573-6aa6bfdaca79"
-    }
-  ]
-
-  // ─── 환경변수 (Cloudflare Dashboard → Workers → Settings) ──
-  // npx wrangler secret put SUPER_JWT_SECRET
-  // npx wrangler secret put ADMIN_JWT_SECRET
-  // npx wrangler secret put GEMINI_API_KEY
-  // npx wrangler secret put RESEND_API_KEY
-  // npx wrangler secret put ENCRYPTION_KEY
-  // npx wrangler secret put ALLOWED_ORIGINS
-  // npx wrangler secret put LOCAL_SUPER_ADMIN_EMAIL
-  // npx wrangler secret put LOCAL_SUPER_ADMIN_PASSWORD_HASH
-  // ─────────────────────────────────────────────────────────
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "ai-chatbot-saas",
+	"main": "./dist/index.js",
+	"compatibility_date": "2026-03-29",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	// Workers Static Assets
+	"assets": {
+		"directory": "./dist/public",
+		"binding": "ASSETS"
+	},
+	// ─── Cloudflare D1 Database ───────────────────────────────
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "ai-chatbot-saas-db",
+			"database_id": "cf3f5086-ff3b-4fcc-a573-6aa6bfdaca79"
+		}
+	],
+	"r2_buckets": [
+		{
+			"bucket_name": "ai-chatbot-saas-images",
+			"binding": "IMAGES",
+			"remote": true
+		}
+	]
+	// ─── 환경변수 (Cloudflare Dashboard → Workers → Settings) ──
+	// npx wrangler secret put SUPER_JWT_SECRET
+	// npx wrangler secret put ADMIN_JWT_SECRET
+	// npx wrangler secret put GEMINI_API_KEY
+	// npx wrangler secret put RESEND_API_KEY
+	// npx wrangler secret put ENCRYPTION_KEY
+	// npx wrangler secret put ALLOWED_ORIGINS
+	// npx wrangler secret put LOCAL_SUPER_ADMIN_EMAIL
+	// npx wrangler secret put LOCAL_SUPER_ADMIN_PASSWORD_HASH
+	// ─────────────────────────────────────────────────────────
 }

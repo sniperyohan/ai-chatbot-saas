@@ -48,6 +48,8 @@ export default function ScenariosPage() {
   const [planLimit, setPlanLimit] = useState<{ scenarios: number | null; responses: number | null }>({ scenarios: null, responses: null })
   const [planName, setPlanName] = useState<string>('basic')
   const [showAddModal, setShowAddModal] = useState(false)
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null)
+
 
   useEffect(() => {
     loadScenarios()
@@ -215,6 +217,104 @@ export default function ScenariosPage() {
       toast.error(e.message || '삭제 실패')
     } finally {
       setDeleting(null)
+    }
+  }
+
+  // 이미지 자동 리사이즈 (Canvas 사용)
+  const resizeImage = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const MAX_WIDTH = 1040
+      const MAX_HEIGHT = 520
+      const QUALITY = 0.85
+
+      // GIF는 애니메이션 보존을 위해 리사이즈 스킵
+      if (file.type === 'image/gif') {
+        resolve(file)
+        return
+      }
+
+      const img = new Image()
+      const reader = new FileReader()
+
+      reader.onload = (e) => {
+        img.src = e.target?.result as string
+      }
+      reader.onerror = () => reject(new Error('파일 읽기 실패'))
+
+      img.onload = () => {
+        let { width, height } = img
+
+        // 비율 유지하면서 축소 (원본보다 작게만)
+        if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+          const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height)
+          width = Math.round(width * ratio)
+          height = Math.round(height * ratio)
+        }
+
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          reject(new Error('Canvas 컨텍스트 생성 실패'))
+          return
+        }
+
+        // 부드러운 리사이즈
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        ctx.drawImage(img, 0, 0, width, height)
+
+        // PNG는 투명도 보존, 나머지는 JPG로 변환 (용량 절감)
+        const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob)
+            else reject(new Error('이미지 변환 실패'))
+          },
+          outputType,
+          QUALITY
+        )
+      }
+      img.onerror = () => reject(new Error('이미지 로드 실패'))
+
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const handleImageUpload = async (key: string, file: File) => {
+    // 파일 크기 체크 (원본 10MB까지 허용 - 어차피 리사이즈됨)
+    if (file.size > 50 * 1024 * 1024) {
+      alert('파일 크기는 50MB 이하여야 합니다.')
+
+      return
+    }
+    if (!file.type.startsWith('image/')) {
+      alert('이미지 파일만 업로드 가능합니다.')
+      return
+    }
+
+    setUploadingKey(key)
+    try {
+      // 1. 클라이언트에서 자동 리사이즈 (1040x520, JPG 85%)
+      const resizedBlob = await resizeImage(file)
+      console.log(`[이미지 리사이즈] ${(file.size / 1024).toFixed(1)}KB → ${(resizedBlob.size / 1024).toFixed(1)}KB`)
+
+      // 2. Blob을 File로 변환 (확장자는 jpg로 통일, GIF/PNG는 유지)
+      const ext = file.type === 'image/gif' ? 'gif' : file.type === 'image/png' ? 'png' : 'jpg'
+      const resizedFile = new File([resizedBlob], `image.${ext}`, { type: resizedBlob.type })
+
+      // 3. R2에 업로드
+      const res = await api.uploadImage(resizedFile)
+      if (res.success && res.data?.url) {
+        update(key, 'image_url', res.data.url)
+      } else {
+        alert(res.error || '업로드 실패')
+      }
+    } catch (e: any) {
+      alert('업로드 실패: ' + (e?.message || '알 수 없는 오류'))
+    } finally {
+      setUploadingKey(null)
     }
   }
 
@@ -456,26 +556,66 @@ export default function ScenariosPage() {
                   </button>
                 )}
               </div>
-              {/* 🖼️ 이미지 URL (선택) - 카카오톡 basicCard */}
+              {/* 🖼️ 이미지 업로드 (선택) - 카카오톡 basicCard */}
               <div style={{ marginTop: '12px', padding: '12px', background: '#F9FAFB', borderRadius: '8px', border: '1px solid #E5E7EB' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: '#374151' }}>
-                  🖼️ 이미지 URL <span style={{ color: '#9CA3AF', fontWeight: 400, fontSize: '11px' }}>(선택 · 카카오톡 이미지 카드)</span>
+                  🖼️ 이미지 <span style={{ color: '#9CA3AF', fontWeight: 400, fontSize: '11px' }}>(선택 · 카카오톡 이미지 카드)</span>
                 </label>
-                <input
-                  type="url"
-                  value={s.image_url || ''}
-                  onChange={e => update(key, 'image_url', e.target.value)}
-                  placeholder="https://example.com/image.jpg"
-                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}
-                />
-                {s.image_url && (
-                  <div style={{ marginTop: '8px' }}>
-                    <img
-                      src={s.image_url}
-                      alt="미리보기"
-                      style={{ maxWidth: '200px', maxHeight: '120px', borderRadius: '6px', border: '1px solid #E5E7EB', display: 'block' }}
-                      onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0.3' }}
+                {!s.image_url ? (
+                  <div
+                    onDragOver={e => { e.preventDefault(); (e.currentTarget as HTMLDivElement).style.background = '#EEF2FF' }}
+                    onDragLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}
+                    onDrop={async (e) => {
+                      e.preventDefault()
+                      ;(e.currentTarget as HTMLDivElement).style.background = 'white'
+                      const f = e.dataTransfer.files?.[0]
+                      if (f) await handleImageUpload(key, f)
+                    }}
+                    style={{ border: '2px dashed #D1D5DB', borderRadius: '8px', padding: '20px', textAlign: 'center', background: 'white', cursor: 'pointer', transition: 'background 0.2s' }}
+                    onClick={() => document.getElementById(`file-input-${key}`)?.click()}
+                  >
+                    <input
+                      id={`file-input-${key}`}
+                      type="file"
+                      accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
+                      style={{ display: 'none' }}
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0]
+                        if (f) await handleImageUpload(key, f)
+                        e.target.value = ''
+                      }}
                     />
+                    {uploadingKey === key ? (
+                      <div style={{ color: '#6366F1', fontSize: '13px' }}>
+                        <Loader2 size={20} style={{ animation: 'spin 1s linear infinite', marginBottom: '4px' }} />
+                        <p style={{ margin: 0 }}>업로드 중...</p>
+                      </div>
+                    ) : (
+                      <div style={{ color: '#6B7280', fontSize: '13px' }}>
+                        <p style={{ margin: '0 0 4px 0', fontWeight: 600 }}>📁 클릭 또는 드래그하여 업로드</p>
+                        <p style={{ margin: 0, fontSize: '11px' }}>JPG, PNG, WEBP, GIF · 최대 50MB (자동 최적화)</p>
+                        <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#6366F1', fontWeight: 600 }}>💡 권장 비율 2:1 (예: 1040×520)</p>
+
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                      <img
+                        src={s.image_url}
+                        alt="미리보기"
+                        style={{ maxWidth: '200px', maxHeight: '120px', borderRadius: '6px', border: '1px solid #E5E7EB', display: 'block' }}
+                        onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0.3' }}
+                      />
+                      <button
+                        onClick={() => update(key, 'image_url', '')}
+                        style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(0,0,0,0.6)', color: 'white', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        title="이미지 제거"
+                      >
+                        ×
+                      </button>
+                    </div>
                     <p style={{ fontSize: '11px', color: '#6B7280', marginTop: '4px', margin: '4px 0 0 0' }}>
                       💡 답변과 함께 이미지 카드로 전송됩니다
                     </p>

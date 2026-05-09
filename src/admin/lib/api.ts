@@ -62,6 +62,21 @@ export const api = {
 
   // Scenarios (Supabase 직접 호출 대신 admin 엔드포인트 사용)
   getScenarios: () => request<any>('GET', '/admin/scenarios'),
+  // 이미지 업로드 (R2)
+  uploadImage: async (file: File): Promise<{ success: boolean; data?: { url: string; key: string; size: number; type: string }; error?: string }> => {
+    const token = getToken()
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch(`${BASE}/admin/upload/image`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    })
+    return res.json()
+  },
+
   saveScenario: (data: Record<string, unknown>) =>
     request<any>('POST', '/admin/scenarios', data),
   updateScenario: (id: string, data: Record<string, unknown>) =>

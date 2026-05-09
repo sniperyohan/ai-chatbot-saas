@@ -13,6 +13,10 @@ export type Bindings = {
   RESEND_API_KEY: string
   ENCRYPTION_KEY: string
   ALLOWED_ORIGINS: string
+  // Cloudflare R2 (이미지 저장)
+  IMAGES: R2Bucket
+  R2_PUBLIC_URL: string
+
   // 로컬 개발용 슈퍼관리자 fallback
   LOCAL_SUPER_ADMIN_EMAIL?: string
   LOCAL_SUPER_ADMIN_PASSWORD_HASH?: string
