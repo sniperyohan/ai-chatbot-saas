@@ -332,10 +332,10 @@ documents.get('/', async (c) => {
       id: string; question: string; answer: string
       original_question: string; original_answer: string
       refined_question: string; refined_answer: string
-      category: string; is_active: number; is_ai_refined: number; created_at: string
+category: string; is_active: number; is_ai_refined: number; image_url: string | null; created_at: string
     }>(c.env,
       `SELECT id, question, answer, original_question, original_answer,
-              refined_question, refined_answer, category, is_active, is_ai_refined, created_at
+      refined_question, refined_answer, category, is_active, is_ai_refined, image_url, created_at
        FROM documents ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       ...params, limit, offset
     ),

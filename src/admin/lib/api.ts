@@ -59,6 +59,8 @@ export const api = {
   deleteDocument: (id: string) => request<any>('DELETE', `/documents/${id}`),
   toggleDocument: (id: string, is_active: boolean) =>
     request<any>('PUT', `/documents/${id}/toggle`, { is_active }),
+  updateDocument: (id: string, data: Record<string, unknown>) =>
+  request<any>('PUT', `/documents/${id}`, data),
 
   // Scenarios (Supabase 직접 호출 대신 admin 엔드포인트 사용)
   getScenarios: () => request<any>('GET', '/admin/scenarios'),
