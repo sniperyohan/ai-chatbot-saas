@@ -207,8 +207,8 @@ documents.post('/', async (c) => {
     `INSERT INTO documents
       (id, tenant_id, question, answer, original_question, original_answer,
        refined_question, refined_answer, content, category, language,
-       is_active, is_deleted, is_ai_refined, image_url, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,1,0,?,?,?,?)`,
+       is_active, is_deleted, is_ai_refined, image_url, short_label, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,1,0,?,?,?,?,?)`,
     docId, tenantId,
     question.trim(), answer.trim(),
     body.original_question || question.trim(),
@@ -219,6 +219,7 @@ documents.post('/', async (c) => {
     category, 'ko',
     body.is_ai_refined ? 1 : 0,
     body.image_url || null,
+    body.short_label || null,
     now, now
   )
 
@@ -288,8 +289,8 @@ documents.post('/embed', async (c) => {
     `INSERT INTO documents
       (id, tenant_id, question, answer, original_question, original_answer,
        refined_question, refined_answer, content, category, language,
-       is_active, is_deleted, is_ai_refined, embedding, image_url, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,1,0,?,?,?,?,?)`,
+       is_active, is_deleted, is_ai_refined, embedding, image_url, short_label, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,1,0,?,?,?,?,?,?)`,
     docId, tenantId,
     question, answer,
     body.original_question || null, body.original_answer || null,
@@ -299,6 +300,7 @@ documents.post('/embed', async (c) => {
     body.is_ai_refined ? 1 : 0,
     JSON.stringify(embedding),
     body.image_url || null,
+    body.short_label || null,
     now, now
   )
 
@@ -335,7 +337,7 @@ documents.get('/', async (c) => {
 category: string; is_active: number; is_ai_refined: number; image_url: string | null; created_at: string
     }>(c.env,
       `SELECT id, question, answer, original_question, original_answer,
-      refined_question, refined_answer, category, is_active, is_ai_refined, image_url, created_at
+      refined_question, refined_answer, category, is_active, is_ai_refined, image_url, short_label, created_at
        FROM documents ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       ...params, limit, offset
     ),

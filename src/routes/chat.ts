@@ -203,29 +203,90 @@ chat.post('/kakao/chat', async (c) => {
     return c.json(kakaoResponse('메시지를 입력해주세요.'))
   }
 
+  // "다른질문" 키워드 → 랜덤 FAQ 4개만 반환
+  if (userMessage === '다른질문' || userMessage === '다른 질문') {
+    const quickReplies = await getRandomQuickReplies(c.env, tenantId, 4)
+    return c.json(kakaoResponse('어떤 게 궁금하세요? 🤔', undefined, quickReplies))
+  }
+
   try {
     const result = await handleChat(c.env, tenantId, userMessage, 'kakao', sessionId)
-    return c.json(kakaoResponse(result.answer, result.imageUrl))
+    const quickReplies = await getRandomQuickReplies(c.env, tenantId, 4)
+    return c.json(kakaoResponse(result.answer, result.imageUrl, quickReplies))
   } catch {
     return c.json(kakaoResponse('잠시만 기다려 주세요. 😊 담당자에게 연결 중입니다.'))
   }
 })
 
-function kakaoResponse(text: string, imageUrl?: string) {
+function kakaoResponse(
+  text: string,
+  imageUrl?: string,
+  quickReplies?: Array<{ action: string; label: string; messageText: string }>
+) {
+  const outputs: any[] = []
+
   if (imageUrl) {
-    return {
-      version: '2.0',
-      template: {
-        outputs: [{
-          basicCard: {
-            description: text,
-            thumbnail: { imageUrl }
-          }
-        }]
+    outputs.push({
+      basicCard: {
+        description: text,
+        thumbnail: { imageUrl }
       }
-    }
+    })
+  } else {
+    outputs.push({ simpleText: { text } })
   }
-  return { version: '2.0', template: { outputs: [{ simpleText: { text } }] } }
+
+  const template: any = { outputs }
+  if (quickReplies && quickReplies.length > 0) {
+    template.quickReplies = quickReplies
+  }
+
+  return { version: '2.0', template }
+}
+
+// ─────────────────────────────────────────
+// 랜덤 FAQ 4개 → quickReplies 생성
+// ─────────────────────────────────────────
+async function getRandomQuickReplies(env: any, tenantId: string, count = 4) {
+  try {
+    const result = await env.DB.prepare(
+      `SELECT original_question, short_label
+       FROM documents
+       WHERE tenant_id = ?
+         AND is_active = 1
+         AND (is_deleted = 0 OR is_deleted IS NULL)
+       ORDER BY RANDOM()
+       LIMIT ?`
+    ).bind(tenantId, count).all()
+
+    const faqs = (result.results || []) as any[]
+
+    const quickReplies = faqs.map((faq: any) => {
+      const question = String(faq.original_question || '')
+      const label = faq.short_label ||
+        (question.length > 14 ? question.slice(0, 13) + '…' : question)
+
+      return {
+        action: 'message',
+        label: String(label),
+        messageText: question
+      }
+    })
+
+    // "다른 질문" 버튼 추가 (FAQ가 1개 이상일 때만)
+    if (quickReplies.length > 0) {
+      quickReplies.push({
+        action: 'message',
+        label: '🔄 다른 질문',
+        messageText: '다른질문'
+      })
+    }
+
+    return quickReplies
+  } catch (err) {
+    console.error('[quickReplies] error:', err)
+    return []
+  }
 }
 
 // ─────────────────────────────────────────

@@ -270,6 +270,7 @@ export default function FAQPage() {
   const [aiToggle, setAiToggle] = useState(true)
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState('')
+  const [shortLabel, setShortLabel] = useState('')
   const [category, setCategory] = useState('일반')
   const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES)
   const [saving, setSaving] = useState(false)
@@ -298,7 +299,7 @@ export default function FAQPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [loadingList, setLoadingList] = useState(true)
   const [editId, setEditId] = useState<string | null>(null)
-  const [editData, setEditData] = useState<{ question: string; answer: string }>({ question: '', answer: '' })
+  const [editData, setEditData] = useState<{ question: string; answer: string; short_label: string }>({ question: '', answer: '', short_label: '' })
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
 
@@ -418,9 +419,10 @@ export default function FAQPage() {
       refined_question: q.question, refined_answer: q.answer,
       content: `${q.question}\n${q.answer}`,
       category, language: 'ko', is_ai_refined: isAi,
+      short_label: shortLabel.trim() || null,
     })
     toast.success('FAQ가 저장되었습니다! ✨')
-    setQuestion(''); setAnswer(''); setPreviewOpen(false); setRefined(null)
+    setQuestion(''); setAnswer(''); setShortLabel(''); setPreviewOpen(false); setRefined(null)
     fetchDocs()
   }
 
@@ -650,7 +652,7 @@ export default function FAQPage() {
 
   const startEdit = (doc: any) => {
     setEditId(doc.id)
-    setEditData({ question: doc.refined_question || doc.original_question || '', answer: doc.refined_answer || doc.original_answer || '' })
+    setEditData({ question: doc.refined_question || doc.original_question || '', answer: doc.refined_answer || doc.original_answer || '', short_label: doc.short_label || '' })
   }
 
   const saveEdit = async (id: string) => {
@@ -659,6 +661,7 @@ export default function FAQPage() {
       await api.embedDocument({
         original_question: editData.question, original_answer: editData.answer,
         refined_question: editData.question, refined_answer: editData.answer,
+        short_label: editData.short_label.trim() || null,
         content: `${editData.question}\n${editData.answer}`, category, language: 'ko',
       })
       toast.success('수정되었습니다.')
@@ -822,6 +825,21 @@ export default function FAQPage() {
                 style={{ ...S.textarea, height: '100px' }} placeholder="답변을 입력하세요." />
               <p style={{ fontSize: '11px', textAlign: 'right', color: 'var(--text-secondary)', marginTop: '4px' }}>{answer.length}/3000</p>
             </div>
+                        <div>
+              <label style={S.label}>
+                💬 추천 버튼 라벨 <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>(선택, 최대 14자)</span>
+              </label>
+              <input
+                type="text"
+                value={shortLabel}
+                onChange={e => setShortLabel(e.target.value)}
+                maxLength={14}
+                style={{ ...S.input, height: '40px' }}
+                placeholder="예: 취소 방법 (비워두면 질문 앞 13자 자동 사용)"
+              />
+              <p style={{ fontSize: '11px', textAlign: 'right', color: 'var(--text-secondary)', marginTop: '4px' }}>{shortLabel.length}/14</p>
+            </div>
+
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: '140px' }}>
                 <label style={S.label}>카테고리</label>
@@ -1110,9 +1128,13 @@ export default function FAQPage() {
                             <td colSpan={6} style={{ padding: '12px 0' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                 <textarea value={editData.question} onChange={e => setEditData(p => ({ ...p, question: e.target.value }))}
-                                  style={{ ...S.textarea, height: '56px', fontSize: '12px' }} />
+                                  style={{ ...S.textarea, height: '56px', fontSize: '12px' }} placeholder="질문" />
                                 <textarea value={editData.answer} onChange={e => setEditData(p => ({ ...p, answer: e.target.value }))}
-                                  style={{ ...S.textarea, height: '72px', fontSize: '12px' }} />
+                                  style={{ ...S.textarea, height: '72px', fontSize: '12px' }} placeholder="답변" />
+                                <input type="text" value={editData.short_label} maxLength={14}
+                                  onChange={e => setEditData(p => ({ ...p, short_label: e.target.value }))}
+                                  style={{ ...S.textarea, height: '36px', fontSize: '12px' }}
+                                  placeholder="💬 추천 버튼 라벨 (선택, 최대 14자)" />
                                 <div style={{ display: 'flex', gap: '8px' }}>
                                   <button onClick={() => saveEdit(doc.id)} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', background: '#059669', color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 12px', cursor: 'pointer', minHeight: '36px', fontFamily: 'inherit' }}><Check size={12} />저장</button>
                                   <button onClick={() => setEditId(null)} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', background: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '6px 12px', cursor: 'pointer', minHeight: '36px', fontFamily: 'inherit' }}><X size={12} />취소</button>
