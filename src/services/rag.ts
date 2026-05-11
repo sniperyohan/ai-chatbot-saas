@@ -259,7 +259,7 @@ export async function processMessage(
         if (scored.length > 0) {
           const top = scored[0]
           const second = scored[1]
-const ambiguous = scored.length >= 2
+          const ambiguous = scored.length >= 2 && (top.score - second.score) <= 1
 
           let chosen = top.sc
 
