@@ -205,14 +205,14 @@ chat.post('/kakao/chat', async (c) => {
 
   // "다른질문" 키워드 → 랜덤 FAQ 4개만 반환
   if (userMessage === '다른질문' || userMessage === '다른 질문') {
-    const quickReplies = await getRandomQuickReplies(c.env, tenantId, 4)
-    return c.json(kakaoResponse('어떤 게 궁금하세요? 🤔', undefined, quickReplies))
+    const listItems = await getRandomListItems(c.env, tenantId, 4)
+    return c.json(kakaoResponse('어떤 게 궁금하세요? 🤔', undefined, listItems))
   }
 
   try {
     const result = await handleChat(c.env, tenantId, userMessage, 'kakao', sessionId)
-    const quickReplies = await getRandomQuickReplies(c.env, tenantId, 4)
-    return c.json(kakaoResponse(result.answer, result.imageUrl, quickReplies))
+    const listItems = await getRandomListItems(c.env, tenantId, 4)
+    return c.json(kakaoResponse(result.answer, result.imageUrl, listItems))
   } catch {
     return c.json(kakaoResponse('잠시만 기다려 주세요. 😊 담당자에게 연결 중입니다.'))
   }
@@ -221,33 +221,45 @@ chat.post('/kakao/chat', async (c) => {
 function kakaoResponse(
   text: string,
   imageUrl?: string,
-  quickReplies?: Array<{ action: string; label: string; messageText: string }>
+  listItems?: Array<{ title: string; description?: string; messageText: string }>
 ) {
   const outputs: any[] = []
 
+  // 이미지 있으면: simpleImage + simpleText 분리 (텍스트 잘림 방지)
   if (imageUrl) {
+    outputs.push({ simpleImage: { imageUrl, altText: '이미지' } })
+  }
+  outputs.push({ simpleText: { text } })
+
+  // 추천 질문 listCard 추가
+  if (listItems && listItems.length > 0) {
     outputs.push({
-      basicCard: {
-        description: text,
-        thumbnail: { imageUrl }
+      listCard: {
+        header: { title: '💡 자주 묻는 질문이에요' },
+        items: listItems.map(item => ({
+          title: item.title,
+          description: item.description || '',
+          action: 'message',
+          messageText: item.messageText
+        })),
+        buttons: [
+          {
+            label: '🎲 다른 질문 보기',
+            action: 'message',
+            messageText: '다른질문'
+          }
+        ]
       }
     })
-  } else {
-    outputs.push({ simpleText: { text } })
   }
 
-  const template: any = { outputs }
-  if (quickReplies && quickReplies.length > 0) {
-    template.quickReplies = quickReplies
-  }
-
-  return { version: '2.0', template }
+  return { version: '2.0', template: { outputs } }
 }
 
 // ─────────────────────────────────────────
-// 랜덤 FAQ 4개 → quickReplies 생성
+// 랜덤 FAQ 4개 → listCard items 생성
 // ─────────────────────────────────────────
-async function getRandomQuickReplies(env: any, tenantId: string, count = 4) {
+async function getRandomListItems(env: any, tenantId: string, count = 4) {
   try {
     const result = await env.DB.prepare(
       `SELECT original_question, short_label
@@ -261,30 +273,24 @@ async function getRandomQuickReplies(env: any, tenantId: string, count = 4) {
 
     const faqs = (result.results || []) as any[]
 
-    const quickReplies = faqs.map((faq: any) => {
+    return faqs.map((faq: any) => {
       const question = String(faq.original_question || '')
-      const label = faq.short_label ||
-        (question.length > 14 ? question.slice(0, 13) + '…' : question)
+      // title: short_label 우선, 없으면 질문 앞 부분
+      const title = faq.short_label ||
+        (question.length > 36 ? question.slice(0, 35) + '…' : question)
+      // description: short_label 있으면 원본 질문을 부가 설명으로 표시
+      const description = faq.short_label
+        ? (question.length > 36 ? question.slice(0, 35) + '…' : question)
+        : ''
 
       return {
-        action: 'message',
-        label: String(label),
+        title: String(title),
+        description: String(description),
         messageText: question
       }
     })
-
-    // "다른 질문" 버튼 추가 (FAQ가 1개 이상일 때만)
-    if (quickReplies.length > 0) {
-      quickReplies.push({
-        action: 'message',
-        label: '🔄 다른 질문',
-        messageText: '다른질문'
-      })
-    }
-
-    return quickReplies
   } catch (err) {
-    console.error('[quickReplies] error:', err)
+    console.error('[listItems] error:', err)
     return []
   }
 }
