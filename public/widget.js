@@ -7,11 +7,11 @@
  * <script>
  *   (function() {
  *     var s = document.createElement('script');
- *     s.src = 'https://ai-chatbot-saas-1cb.pages.dev/widget.js';
+ *     s.src = 'https://ai-chatbot-saas.angels1st.workers.dev/widget.js';
  *     s.onload = function() {
  *       ChatbotWidget.init({
  *         tenantId: 'YOUR_TENANT_ID',
- *         apiUrl:   'https://ai-chatbot-saas-1cb.pages.dev',
+ *         apiUrl:   'https://ai-chatbot-saas.angels1st.workers.dev',
  *         color:    '#4F46E5',
  *         botName:  'AI 상담봇',
  *         greeting: '안녕하세요! 무엇을 도와드릴까요? 😊'
@@ -576,7 +576,7 @@
     if (!scripts.length) return;
     var s         = scripts[scripts.length - 1];
     var tenantId  = s.getAttribute('data-tenant');
-    var apiUrl    = s.getAttribute('data-api-url') || 'https://ai-chatbot-saas-1cb.pages.dev';
+    var apiUrl    = s.getAttribute('data-api-url') || 'https://ai-chatbot-saas.angels1st.workers.dev';
     var color     = s.getAttribute('data-color')   || '#4F46E5';
     var botName   = s.getAttribute('data-bot-name')|| 'AI 상담봇';
     var greeting  = s.getAttribute('data-greeting')|| '안녕하세요! 무엇을 도와드릴까요? 😊';

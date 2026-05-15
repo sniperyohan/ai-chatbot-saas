@@ -284,7 +284,7 @@ export default function InstallPage() {
   const widgetColor = tenant?.widget_color || '#4F46E5'
   const botName     = tenant?.bot_name     || 'AI 상담봇'
   const greeting    = tenant?.greeting_message || '안녕하세요! 무엇을 도와드릴까요? 😊'
-  const domain      = 'https://ai-chatbot-saas-1cb.pages.dev'
+  const domain      = 'https://ai-chatbot-saas.angels1st.workers.dev'
 
   /* ── 설치 코드 1: data-tenant 속성 방식 (간단) ── */
   const widgetScript = `<script\n  src="${domain}/widget.js"\n  data-tenant="${tenantId}"\n  data-color="${widgetColor}"\n  data-bot-name="${botName}"\n  defer\n></script>`

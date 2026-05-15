@@ -21,6 +21,7 @@ import tenantRouter from './routes/tenant'
 import categoriesRouter from './routes/categories'
 import scenariosRouter from './routes/scenarios'
 import uploadRouter from './routes/upload'
+import cafe24Router from './routes/cafe24'
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
@@ -94,6 +95,7 @@ app.route('/api/categories', categoriesRouter)
 app.route('/api/admin/categories', categoriesRouter)
 app.route('/api/admin/scenarios', scenariosRouter)
 app.route('/api/admin/upload', uploadRouter)
+app.route('/api/cafe24', cafe24Router)
 
 // Admin SPA - index.html을 직접 반환 (SPA routing 지원)
 const ADMIN_HTML = `<!DOCTYPE html>
@@ -106,7 +108,7 @@ const ADMIN_HTML = `<!DOCTYPE html>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <script type="module" crossorigin src="/admin/assets/index-DQ9SBaSL-v2.js"></script>
+  <script type="module" crossorigin src="/admin/assets/index-3cAbkRsq-v2.js"></script>
   <link rel="modulepreload" crossorigin href="/admin/assets/react-vendor-C3uA-UMJ-v2.js">
   <link rel="modulepreload" crossorigin href="/admin/assets/lucide-vendor-DB4mdYJ--v2.js">
   <link rel="modulepreload" crossorigin href="/admin/assets/recharts-vendor-Dhxszn48-v2.js">
